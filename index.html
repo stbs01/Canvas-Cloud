@@ -155,6 +155,15 @@
     letter-spacing:.1em;font-size:12px;background:var(--cbg);z-index:7;transition:opacity .5s}
   .loading.gone{opacity:0;pointer-events:none}
 
+  /* one-time mobile hint pointing at the eye / image-only toggle */
+  .eye-tip{position:fixed;top:62px;left:50%;transform:translate(-50%,-10px);z-index:50;display:none;
+    align-items:center;gap:10px;max-width:min(360px,calc(100vw - 24px));padding:11px 14px;border-radius:12px;
+    background:var(--cbg);color:var(--uf);border:1px solid rgba(128,128,128,.32);pointer-events:auto;cursor:pointer;
+    box-shadow:0 16px 40px -16px rgba(0,0,0,.55);font-size:13px;line-height:1.35;
+    opacity:0;transition:opacity .35s ease,transform .35s ease}
+  .eye-tip.show{display:flex;opacity:1;transform:translate(-50%,0)}
+  .eye-tip svg{flex:0 0 auto;opacity:.9}
+
   /* description panel */
   .panel{position:absolute;right:20px;top:50%;width:300px;max-width:calc(100% - 40px);max-height:calc(100% - 132px);transform:translate(120%,-50%);z-index:9;font-size:var(--cardfs,14px);
     display:flex;flex-direction:column;
@@ -172,6 +181,9 @@
   @media(max-width:720px){
     .panel{right:auto;left:50%;top:auto;bottom:14px;width:min(560px,calc(100% - 24px));transform:translate(-50%,140%);max-height:calc(100% - 84px);overflow:hidden}
     .panel.open{transform:translate(-50%,0)}
+    .panel.open.min{transform:translate(-50%,calc(100% - 50px))}   /* minimised: slide down, leaving a slim handle with the +/✕ buttons → the full image shows */
+    .panel .min{display:block}
+    .panel .ttl{padding-right:60px}   /* clear BOTH the − and ✕ buttons */
   }
   .panel .ttl{font-weight:600;font-size:1.08em;line-height:1.3;padding-right:26px}
   .panel .yr{color:var(--muted);font-size:.9em;margin-top:3px}
@@ -213,6 +225,9 @@
   .panel .x{position:absolute;top:10px;right:12px;background:none;border:none;color:inherit;font-size:20px;
     cursor:pointer;line-height:1;opacity:.6}
   .panel .x:hover{opacity:1}
+  .panel .min{display:none;position:absolute;top:9px;right:42px;background:none;border:none;color:inherit;font-size:24px;
+    cursor:pointer;line-height:1;opacity:.6;padding:0;width:22px;text-align:center}   /* phones only: minimise this plate → full image, no plate; tap again to bring it back */
+  .panel .min:hover{opacity:1}
 
   /* hover-blur — every text link & button softly blurs on hover, matching the website's link behaviour */
   .pill,.ctl,.padnote-x,.mn-ok,.bgsw,
@@ -310,6 +325,7 @@
     </div>
 
     <div class="panel" id="panel">
+      <button class="min" id="panelMin" type="button" aria-label="Minimise panel — see the full image">−</button>
       <button class="x" id="panelX">✕</button>
       <div class="phead">
         <div class="ttl" id="pTitle"></div>
@@ -327,6 +343,10 @@
       </div>
     </div>
 
+    <div class="eye-tip" id="eyeTip">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>Tip: tap the eye icon in the top bar for <b>image-only mode</b> — hides every plate.</span>
+    </div>
     <div class="loading" id="loading">Loading…</div>
     <div class="mobile-note" id="mobileNote"><div class="mn-box">
       <div class="mn-txt">For the best experience, view this on a computer or a tablet.</div>
@@ -714,7 +734,7 @@ class PhotoCloud{
     this.t={ x:-wx*fs, y:-item.y*fs, s:fs, rx:this.rx, ry:this.ry };            // leave orbit (torbit) untouched so a back-of-cloud photo opens in place
     this.focusItem=item; this.mode='focus'; this._stopDrift(); this._tween(this.t,0.95); this.block.classList.add('is-focus');
     document.getElementById('fog').classList.add('show');
-    if(this.showText) this._fillPanel(item);
+    if(this.showText){ this._fillPanel(item); this._eyeTip(); }
     const fi=document.getElementById('focusImg'); fi.querySelector('img').src=item.p.url;   // crisp full-res
     clearTimeout(this.focusTimer); this.focusTimer=setTimeout(()=>fi.classList.add('show'),150);   // show reliably (no mode/timing race); _closeFocusImg clears it on close
   }
@@ -740,9 +760,20 @@ class PhotoCloud{
     pd.innerHTML=shortD; px.innerHTML=extra; px.classList.remove('open'); px.style.maxHeight='0px'; pd._open=false;   // short paragraph stays put; extra slides open → no last-moment text swap
     pm.textContent='Read more'; pm.style.display=strip(extra).length>4?'':'none';
     document.getElementById('pDrop').classList.remove('open'); document.getElementById('pBody').style.maxHeight='0px';
-    document.getElementById('panel').classList.add('open');
+    const panel=document.getElementById('panel'); panel.classList.remove('min');   // every card opens expanded
+    const mb=document.getElementById('panelMin'); if(mb) mb.textContent='−';
+    panel.classList.add('open');
   }
   _closeFocusImg(){ clearTimeout(this.focusTimer); document.getElementById('focusImg').classList.remove('show'); document.getElementById('fog').classList.remove('show'); }
+  _eyeTip(){                                                // phones: on the FIRST card opened, point out the image-only (eye) toggle — once per session
+    if(this._eyeTipShown) return;
+    const touch=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+    if(!(touch && window.matchMedia('(max-width:720px)').matches)) return;
+    this._eyeTipShown=true;
+    const t=document.getElementById('eyeTip'); if(!t) return;
+    t.classList.add('show'); t.onclick=()=>t.classList.remove('show');
+    clearTimeout(this._eyeTipT); this._eyeTipT=setTimeout(()=>t.classList.remove('show'),6500);
+  }
 
   /* ---- drift with countdown + smooth ease-in ---- */
   _startCountdown(){ this.countdown=performance.now()+5000; document.getElementById('driftMsg').classList.add('show'); this._cdText(); }
@@ -932,6 +963,9 @@ function buildApp(){ pills.innerHTML='';
 
 // controls
 document.getElementById('panelX').onclick=()=>cloud._closeFocus();
+(function(){ const panel=document.getElementById('panel'), mb=document.getElementById('panelMin');
+  mb.onclick=()=>{ const on=!panel.classList.contains('min'); panel.classList.toggle('min',on);
+    mb.textContent=on?'+':'−'; mb.title=on?'Show the info plate':'Minimise — see the full image'; }; })();
 function _afterMaxH(el,cb){ const h=e=>{ if(e.target!==el||e.propertyName!=='max-height')return; el.removeEventListener('transitionend',h); cb(); }; el.addEventListener('transitionend',h); }
 document.getElementById('pSum').onclick=()=>{ const d=document.getElementById('pDrop'), body=document.getElementById('pBody');
   const open=d.classList.toggle('open');
