@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Photo Cloud — prototype</title>
+<style>
+  :root{ --page-bg:#f4f2ee; --ink:#141414; --muted:#6b6b6b; --line:#d9d5cd; --cbg:#eeeae1; --uf:#141414; }   /* beige (default) */
+  body.bg-white{ --page-bg:#fbfbfb; --ink:#141414; --muted:#6b6b6b; --line:#e7e7e7; --cbg:#ffffff; --uf:#141414; }
+  body.bg-grey{ --page-bg:#7b7b80; --ink:#f5f5f6; --muted:#dadade; --line:#61616a; --cbg:#89898e; --uf:#ffffff; }
+  body.night{ --page-bg:#0d0d0f; --ink:#ececec; --muted:#9a9a9a; --line:#26262a; --cbg:#050506; --uf:#ffffff; }   /* black */
+  body.cloud-block, body{transition:background-color .35s}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--page-bg);color:var(--ink);
+    font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;
+    line-height:1.5;transition:background .35s,color .35s}
+  .wrap{max-width:820px;margin:0 auto;padding:0 24px}
+
+  header.site{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--page-bg) 88%,transparent);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  header.site .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  header.site .brand{font-weight:700;letter-spacing:.2px;font-size:15px}
+  header.site nav{display:flex;gap:18px;align-items:center;font-size:13px}
+  header.site nav a{color:var(--muted);text-decoration:none}
+  header.site nav a:hover{color:var(--ink)}
+  .menu-cloud{border:1px solid var(--ink);border-radius:999px;padding:6px 14px;
+    color:var(--ink)!important;font-weight:600;cursor:pointer;background:none;font-size:13px}
+  .menu-cloud:hover{opacity:.7}
+
+  .series-head{padding:52px 0 8px}
+  .series-head .kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .series-head h1{font-size:34px;margin:.2em 0 .12em;font-weight:800;letter-spacing:-.01em}
+  .series-head .sub{color:var(--muted);font-style:italic;margin-bottom:20px}
+  .series-text{padding-bottom:30px;font-size:16.5px}
+
+  /* ---- cloud block ---- */
+  .cloud-block{position:relative;width:100%;height:72vh;min-height:480px;background:var(--cbg);
+    border-radius:6px;overflow:hidden;box-shadow:0 24px 60px -30px rgba(0,0,0,.5);
+    cursor:grab;user-select:none;touch-action:none;transition:background .35s}
+  .cloud-block.dragging{cursor:grabbing}
+  .cloud-block.css-full{position:fixed;inset:0;z-index:60;height:auto;border-radius:0;min-height:0}
+  .cloud-block:fullscreen{border-radius:0}
+  body.cloud-open{overflow:hidden}
+
+  .scene{position:absolute;inset:0;perspective:1100px;overflow:hidden;touch-action:none}   /* none → 2- and 3-finger gestures reach us as pointer events instead of being eaten by the browser */
+  .world{position:absolute;left:0;top:0;width:100%;height:100%;transform-style:preserve-3d;touch-action:none}
+  .photo{position:absolute;left:50%;top:50%;transform-style:preserve-3d;backface-visibility:hidden;-webkit-backface-visibility:hidden;touch-action:none}
+  .photo img{display:block;width:100%;height:100%;object-fit:cover;
+    box-shadow:0 12px 34px rgba(0,0,0,.5);
+    -webkit-user-drag:none;user-drag:none;pointer-events:none}
+  .photo.broken{background:#33343a;display:flex;align-items:center;justify-content:center;
+    color:#aaa;font-size:10px;text-align:center;padding:8px}
+  .photo .cap{display:none}   /* the title is drawn by the flat HUD pill below (real backdrop-blur), not inside the 3-D world */
+  /* flat, 2-D title pill in the overlay above the scene → its backdrop-filter blurs the FULLY-composited cloud behind it (works for every work, unlike an in-world caption which can't blur sibling 3-D layers) */
+  .caphud{position:absolute;left:0;top:0;transform:translate(-50%,0);width:max-content;max-width:340px;
+    text-align:center;color:var(--uf);font-size:12px;font-weight:500;letter-spacing:.04em;line-height:1.4;
+    white-space:normal;overflow-wrap:break-word;   /* wrap long titles onto a new line at word boundaries; the pill grows to fit instead of the text spilling out */
+    padding:6px 16px;border-radius:999px;background:color-mix(in srgb,var(--cbg) 30%,transparent);
+    backdrop-filter:blur(8px) saturate(1.05);-webkit-backdrop-filter:blur(8px) saturate(1.05);
+    pointer-events:none;opacity:0;transition:opacity .18s;z-index:7;
+    text-shadow:0 1px 3px color-mix(in srgb,var(--cbg) 55%,transparent)}
+  .caphud.show{opacity:1}
+  .cloud-block.notext .photo .cap{display:none}      /* "hide text" mode: no hover titles */
+  .cloud-block.is-focus .photo{pointer-events:none}   /* background inactive while a photo is open */
+  .cloud-block.is-focus .pad,.cloud-block.is-focus .zoomer,.cloud-block.is-focus .padnote,.cloud-block.is-focus .hint{opacity:0;pointer-events:none;transition:opacity .2s}   /* clear the cloud nav while viewing a work → no overlap with the panel */
+  .vignette{position:absolute;inset:0;pointer-events:none;z-index:2;
+    background:radial-gradient(ellipse at center, transparent 52%, color-mix(in srgb,var(--cbg) 42%,transparent) 100%)}
+
+  /* crisp full-res image shown when a photo is focused */
+  .focusimg{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;opacity:0;transition:opacity .45s ease;padding:82px 24px 42px;
+    transform:translateZ(0);-webkit-transform:translateZ(0)}   /* own compositing layer → shows ABOVE the 3D scene on iOS (was rendering behind it) */
+  .focusimg.show{opacity:1}
+  .focusimg img{max-width:min(80vw,940px);max-height:82vh;object-fit:contain;
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.7);background:#111}
+  @media(min-width:721px){ .focusimg{padding-right:360px} }   /* leave room for the side panel */
+  @media(max-width:720px){ .focusimg{padding:70px 12px 30px} .focusimg img{max-width:94vw;max-height:70vh} }   /* controls are hidden while focused, so the image can use the space */
+
+  /* ---- overlay UI ---- */
+  .fog{position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0;transition:opacity .8s ease;
+    background:color-mix(in srgb,var(--cbg) 22%,transparent)}   /* no always-on backdrop-filter → no white re-raster flash on theme switch, and lighter */
+  .fog.show,.cloud-block.switching .fog{opacity:1}
+  .cloud-block.shaking .fog{opacity:1;backdrop-filter:blur(34px) saturate(.85);-webkit-backdrop-filter:blur(34px) saturate(.85);
+    background:color-mix(in srgb,var(--cbg) 32%,transparent)}   /* much stronger "cloud" blur while shaking */
+  .fog.show{backdrop-filter:blur(15px) saturate(.9);-webkit-backdrop-filter:blur(15px) saturate(.9)}   /* selecting a photo: a bit more blur */
+  .cloud-block.switching .fog{backdrop-filter:blur(15px) saturate(.9);-webkit-backdrop-filter:blur(15px) saturate(.9);
+    background:color-mix(in srgb,var(--cbg) 40%,transparent)}   /* dense enough to fully hide the series swap */
+  .cloud-ui{position:absolute;inset:0;pointer-events:none;color:var(--uf);z-index:8;font-size:12px}
+  .cloud-ui .bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:12px 14px;
+    background:linear-gradient(to bottom,color-mix(in srgb,var(--cbg) 55%,transparent),transparent)}
+  .cloud-ui .bar .t{font-weight:600;letter-spacing:.06em;text-transform:uppercase;opacity:.85;font-size:11px;
+    flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cloud-ui .bar .btns{display:flex;gap:7px;flex:none;align-items:center}
+  .cloud-ui .bar .logo{height:30px;width:auto;flex:none;margin-right:18px;border-radius:5px;display:block;
+    pointer-events:auto;opacity:.96;filter:drop-shadow(0 1px 4px rgba(0,0,0,.45))}
+  .ctl{pointer-events:auto;background:rgba(128,128,128,.16);border:1px solid rgba(128,128,128,.4);
+    color:var(--uf);border-radius:999px;padding:6px 11px;cursor:pointer;font-size:12px;
+    backdrop-filter:blur(4px);transition:background .15s,opacity .15s;line-height:1}
+  .ctl:hover{background:rgba(128,128,128,.3)}
+  .ctl.on{background:var(--uf);color:var(--cbg);border-color:var(--uf)}
+  .reg{display:inline-flex;align-items:center;gap:6px;pointer-events:auto}
+  .reg{align-items:center}
+  .reg svg{flex:0 0 auto;width:16px;height:16px;opacity:.95;color:var(--uf);vertical-align:middle}   /* all icons: same size + colour (like the speed one) + vertically centred to the bar */
+  .speed{pointer-events:auto;width:54px;accent-color:var(--uf);cursor:pointer;vertical-align:middle}
+  .speed.depth{accent-color:color-mix(in srgb,var(--uf) 58%,var(--cbg))}   /* mid grey */
+  .speed.focus{accent-color:color-mix(in srgb,var(--uf) 38%,var(--cbg))}   /* lighter grey */
+  .regs{display:inline-flex;align-items:center;gap:9px}
+  .regs-toggle{display:none}
+  .bgwrap{position:relative;display:inline-flex}
+  .bgpop{position:absolute;top:calc(100% + 9px);right:0;display:none;gap:9px;padding:9px 10px;z-index:14;
+    background:var(--cbg);border:1px solid rgba(128,128,128,.34);border-radius:11px;box-shadow:0 14px 34px -14px rgba(0,0,0,.5)}
+  .bgpop.open{display:flex}
+  .bgsw{width:24px;height:24px;border-radius:50%;border:1.5px solid rgba(128,128,128,.55);cursor:pointer;padding:0;pointer-events:auto}
+  .bgsw.active{box-shadow:0 0 0 2px var(--cbg),0 0 0 4px var(--uf)}
+  .reg .rlbl{display:none;font-size:11px;opacity:.85;min-width:44px;letter-spacing:.02em}
+  .mobile-note{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
+    background:rgba(10,10,12,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);padding:24px}
+  .mobile-note.show{display:flex}
+  .mobile-note .mn-box{max-width:320px;text-align:center;background:var(--cbg);color:var(--uf);
+    border:1px solid color-mix(in srgb,var(--uf) 16%,transparent);border-radius:16px;padding:22px 22px 18px;
+    box-shadow:0 24px 60px -20px rgba(0,0,0,.6)}
+  .mobile-note .mn-txt{font-size:15px;line-height:1.5;margin-bottom:16px}
+  .mobile-note .mn-ok{font:inherit;font-size:14px;padding:9px 24px;border-radius:999px;cursor:pointer;background:var(--uf);color:var(--cbg);border:0}
+  .ctl svg{display:block;vertical-align:middle}
+
+  /* series pills */
+  .pills{flex:1;min-width:0;display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .pills::-webkit-scrollbar{display:none}
+  .pill{pointer-events:auto;white-space:nowrap;flex:none;background:rgba(128,128,128,.14);
+    border:1px solid rgba(128,128,128,.35);color:var(--uf);border-radius:999px;padding:5px 12px;
+    font-size:12px;cursor:pointer;backdrop-filter:blur(4px);transition:background .15s,color .15s;outline:none}
+  .pill:hover{background:rgba(128,128,128,.28)}
+  .pill.active{background:var(--uf);color:var(--cbg);border-color:var(--uf)}   /* no weight change → row doesn't shift */
+  .pill.all{background:color-mix(in srgb,var(--uf) 12%,transparent);border-color:color-mix(in srgb,var(--uf) 32%,transparent);
+    font-weight:600;letter-spacing:.02em}
+  .pill.all.active{background:var(--uf);color:var(--cbg);border-color:var(--uf)}
+  .pdiv{flex:none;width:1px;align-self:stretch;margin:4px 0;background:rgba(128,128,128,.5)}   /* real flex item → equal gap on both sides */
+
+  /* directional pad + zoomer */
+  .pad{position:absolute;left:14px;bottom:14px;display:grid;grid-template-columns:repeat(3,34px);
+    grid-template-rows:repeat(2,34px);gap:5px;pointer-events:none}
+  .pad .ctl{pointer-events:auto;width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .pad .rotl{grid-column:1;grid-row:1}.pad .up{grid-column:2;grid-row:1}.pad .rotr{grid-column:3;grid-row:1}
+  .pad .left{grid-column:1;grid-row:2}.pad .down{grid-column:2;grid-row:2}.pad .right{grid-column:3;grid-row:2}
+  .pad .rotl,.pad .rotr{opacity:.92}
+  .padnote{position:absolute;left:162px;bottom:16px;max-width:238px;pointer-events:none;z-index:8;
+    font-size:11.5px;line-height:1.5;letter-spacing:.01em;color:var(--uf);opacity:.85;
+    background:color-mix(in srgb,var(--cbg) 66%,transparent);border:1px solid color-mix(in srgb,var(--uf) 24%,transparent);
+    border-radius:10px;padding:9px 28px 10px 13px;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+  .padnote .ri{width:1.3em;height:1.3em;vertical-align:-0.32em;margin:0 1px}
+  .padnote-x{position:absolute;top:3px;right:4px;width:18px;height:18px;line-height:16px;text-align:center;padding:0;
+    border:0;background:none;color:var(--uf);opacity:.5;font-size:12px;cursor:pointer;pointer-events:auto;border-radius:5px}
+  .padnote-x:hover{opacity:.92;background:color-mix(in srgb,var(--uf) 12%,transparent)}
+  @media(max-width:760px){ .padnote{display:none} }
+  .zoomer{position:absolute;right:14px;bottom:14px;display:flex;flex-direction:column;gap:5px}
+  .zoomer .ctl{width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;font-size:16px}
+  .hint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);pointer-events:none;
+    background:color-mix(in srgb,var(--cbg) 55%,transparent);border:1px solid rgba(128,128,128,.28);
+    border-radius:999px;padding:7px 15px;opacity:.9;transition:opacity .5s;white-space:nowrap;
+    max-width:calc(100% - 160px);overflow:hidden;text-overflow:ellipsis;font-size:11.5px}
+  .hint.gone{opacity:0}
+  .drift-msg{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);z-index:6;pointer-events:none;
+    background:rgba(15,16,20,.5);border:1px solid rgba(255,255,255,.24);color:#fff;   /* dark glass pill + white text → readable over any photo, light or dark */
+    padding:6px 14px;border-radius:999px;font-size:12px;letter-spacing:.02em;opacity:0;transition:opacity .8s ease;
+    backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);text-shadow:0 1px 7px rgba(0,0,0,.6);white-space:nowrap}
+  .drift-msg.show{opacity:.95}
+  .drift-msg .wv{display:inline-block;margin-right:7px;animation:wv 1.7s ease-in-out infinite}
+  @keyframes wv{0%,100%{transform:translateX(-2px) rotate(-6deg);opacity:.5}50%{transform:translateX(2px) rotate(6deg);opacity:1}}
+  .loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--uf);
+    letter-spacing:.1em;font-size:12px;background:var(--cbg);z-index:7;transition:opacity .5s}
+  .loading.gone{opacity:0;pointer-events:none}
+
+  /* description panel */
+  .panel{position:absolute;right:20px;top:50%;width:300px;max-width:calc(100% - 40px);max-height:calc(100% - 132px);transform:translate(120%,-50%);z-index:9;font-size:var(--cardfs,14px);
+    display:flex;flex-direction:column;
+    background:rgba(250,250,250,.985);color:#141414;border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:16px 18px;
+    pointer-events:none;box-shadow:0 20px 50px -20px rgba(0,0,0,.5);
+    transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .3s;opacity:0}   /* solid bg, NO backdrop-filter → the panel's text renders on iOS (the blur was hiding its content) */
+  .panel .phead{flex:0 0 auto}   /* title, year, series link + "About" toggle stay fixed at the top → the scrollbar only ever runs beside the description, never near the ✕ */
+  .panel .pscroll{flex:1 1 auto;overflow-y:auto;min-height:0;margin-top:11px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;margin-right:-8px;padding-right:16px;   /* fixed gap under "About the series" → the scrolling text never merges into the toggle */
+    scrollbar-width:thin;scrollbar-color:color-mix(in srgb,currentColor 34%,transparent) transparent}   /* thin bar tucked into the right gutter → clears both the text and the ✕ */
+  .panel .pscroll::-webkit-scrollbar{width:6px}
+  .panel .pscroll::-webkit-scrollbar-thumb{background:color-mix(in srgb,currentColor 32%,transparent);border-radius:4px}
+  .panel .pscroll::-webkit-scrollbar-track{background:transparent}   /* title + description scroll here when the text is tall; close (✕) and A−/A+ stay pinned */
+  body.night .panel,body.bg-grey .panel{background:rgba(20,20,22,.975);color:#ececec;border-color:rgba(255,255,255,.12)}
+  .panel.open{transform:translate(0,-50%);opacity:1;pointer-events:auto}
+  @media(max-width:720px){
+    .panel{right:auto;left:50%;top:auto;bottom:14px;width:min(560px,calc(100% - 24px));transform:translate(-50%,140%);max-height:calc(100% - 84px);overflow:hidden}
+    .panel.open{transform:translate(-50%,0)}
+  }
+  .panel .ttl{font-weight:600;font-size:1.08em;line-height:1.3;padding-right:26px}
+  .panel .yr{color:var(--muted);font-size:.9em;margin-top:3px}
+  .panel .pseries{display:inline-flex;align-items:center;gap:5px;margin-top:7px;font-size:.93em;font-weight:600;color:inherit;
+    text-decoration:none;border-bottom:1px solid color-mix(in srgb,currentColor 38%,transparent);opacity:.92;padding-bottom:1px}
+  .panel .pseries::after{content:"";display:inline-block;width:13px;height:13px;margin-left:3px;vertical-align:-2px;background:currentColor;opacity:.95;
+    -webkit-mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4L11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>') center/contain no-repeat;
+    mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4L11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>') center/contain no-repeat}   /* bolder external-link icon → series page */
+  .panel .pseries:hover{opacity:1}
+  .panel .pdrop{margin-top:10px}
+  .panel .psum{background:none;border:none;padding:0;color:inherit;cursor:pointer;font-size:.9em;opacity:.88;
+    display:inline-flex;align-items:center;gap:6px;user-select:none}   /* plain text (not a button), just a clearer arrow */
+  .panel .psum:hover{opacity:1}
+  .panel .psum::after{content:"";flex:0 0 auto;width:13px;height:13px;display:inline-block;background:currentColor;opacity:1;transition:transform .3s ease;
+    -webkit-mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg>') center/contain no-repeat;
+    mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg>') center/contain no-repeat}   /* crisp SVG chevron, vertically centred by the flex row (no stray-glyph baseline drift) */
+  .panel .pdrop.open .psum::after{transform:rotate(180deg)}
+  .panel .pdrop.open .psum{font-style:italic}   /* italic once open → visually separated from the description below */
+  .panel .pbody{max-height:0;overflow:hidden;transition:max-height .42s cubic-bezier(.2,.8,.2,1)}
+  .panel .desc{font-size:.93em;margin-top:8px;line-height:1.55;opacity:.85}
+  .panel .descx{font-size:.93em;line-height:1.55;opacity:.85;max-height:0;overflow:hidden;transition:max-height .5s cubic-bezier(.2,.8,.2,1)}
+  .panel .tsize{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:15px}
+  .panel .tszbtn{font:inherit;font-size:14px;line-height:1;padding:5px 11px;border-radius:8px;border:1px solid color-mix(in srgb,currentColor 26%,transparent);background:none;color:inherit;cursor:pointer}
+  .panel .tszbtn:hover{background:color-mix(in srgb,currentColor 9%,transparent)}
+  .panel .desc p,.panel .descx p{margin:0 0 .7em}
+  .panel .descx p:first-child{margin-top:.7em}
+  .panel .desc p:last-child,.panel .descx p:last-child{margin-bottom:0}
+  .panel .desc em,.panel .desc i,.panel .descx em,.panel .descx i{font-style:italic}
+  .panel .desc a,.panel .descx a{color:inherit}
+  .panel .pmore{margin-top:8px;background:none;border:none;padding:0;color:inherit;cursor:pointer;font-size:12px;
+    opacity:.7;text-decoration:underline;text-underline-offset:2px}
+  .panel .pmore:hover{opacity:1}
+  .panel .x{position:absolute;top:10px;right:12px;background:none;border:none;color:inherit;font-size:20px;
+    cursor:pointer;line-height:1;opacity:.6}
+  .panel .x:hover{opacity:1}
+
+  /* hover-blur — every text link & button softly blurs on hover, matching the website's link behaviour */
+  .menu-cloud,header.site nav a,.pill,.ctl,.padnote-x,.mn-ok,.bgsw,
+  .panel .pseries,.panel .psum,.panel .pmore,.panel .tszbtn,.panel .x{
+    transition:filter .25s ease,background .2s ease,opacity .2s ease,color .2s ease,border-color .2s ease}
+  .menu-cloud:hover,header.site nav a:hover,.pill:hover,.ctl:hover,.padnote-x:hover,.mn-ok:hover,.bgsw:hover,
+  .panel .pseries:hover,.panel .psum:hover,.panel .pmore:hover,.panel .tszbtn:hover,.panel .x:hover{filter:blur(2.6px)}
+
+  hr.sep{border:none;border-top:1px solid var(--line);margin:40px 0}
+  .seq{padding-bottom:80px}
+  .seq h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 22px}
+  .seq figure{margin:0 0 42px}
+  .seq img{width:100%;height:auto;display:block;background:color-mix(in srgb,var(--cbg) 60%,var(--page-bg))}
+  .seq figcaption{font-size:13.5px;margin-top:10px}
+  .seq figcaption .yr{color:var(--muted)}
+  .foot{color:var(--muted);font-size:12px;text-align:center;padding:26px 0 60px}
+  @media(max-width:600px){
+    header.site nav a:not(.menu-cloud){display:none}
+    .series-head h1{font-size:26px}
+    .hint{display:none}
+  }
+  @media(max-width:700px){                       /* small screens: pills drop to their own row, controls stay on top */
+    .cloud-ui .bar{flex-wrap:wrap;row-gap:8px}
+    .cloud-ui .bar .logo{margin-right:auto}
+    .pills{order:3;flex-basis:100%;min-width:100%}
+    .dlbl{display:none}
+    .regs-toggle{display:inline-flex}                         /* phone: a tap-to-open drift settings panel instead of inline sliders */
+    .regs{display:none;position:absolute;top:calc(100% + 8px);right:8px;flex-direction:column;align-items:stretch;gap:16px;
+      background:var(--cbg);border:1px solid rgba(128,128,128,.32);   /* SOLID bg, no backdrop-filter → sliders + labels render on iOS */
+      border-radius:12px;padding:15px 16px;z-index:12;min-width:216px;
+      box-shadow:0 16px 40px -16px rgba(0,0,0,.55)}
+    .regs.open{display:flex}
+    .regs .reg{display:flex;width:100%;gap:10px;align-items:center}
+    .reg .rlbl{display:inline}
+    .regs .speed{flex:1;width:auto}
+    .regs-toggle.on{background:var(--uf);color:var(--cbg);border-color:var(--uf)}
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <div class="brand">Studio Teimur Bek Safiuli</div>
+    <nav>
+      <a href="#">Works</a><a href="#">News</a><a href="#">Bio</a>
+      <button class="menu-cloud" id="menuCloud">⤢ View fullscreen</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="series-head">
+    <div class="kicker">Work series</div>
+    <h1 id="hTitle">—</h1>
+    <div class="sub" id="hSub">—</div>
+  </section>
+  <section class="series-text" id="hText"></section>
+
+  <!-- ===== EMBEDDED CLOUD BLOCK ===== -->
+  <div class="cloud-block" id="cloud">
+    <div class="scene" id="scene"><div class="world" id="world"></div></div>
+    <div class="vignette"></div>
+    <div class="fog" id="fog"></div>
+    <div class="focusimg" id="focusImg"><img alt=""></div>
+
+    <div class="cloud-ui">
+      <div class="caphud" id="capHud"></div>
+      <div class="bar">
+        <img class="logo" id="logo" src="https://cloud.teimur-bek-safiuli.com/visuals/tbs_blur_w_transparent_fit.png" alt="Studio Teimur Bek Safiuli">
+        <div class="pills" id="pills"></div>
+        <span class="btns">
+          <button class="ctl" id="btnText" title="Show / hide titles & text"></button>
+          <span class="bgwrap">
+            <button class="ctl" id="btnTheme" title="Background colour"></button>
+            <span class="bgpop" id="bgpop">
+              <button class="bgsw" data-bg="" style="background:#eeeae1" title="Beige"></button>
+              <button class="bgsw" data-bg="bg-white" style="background:#ffffff" title="White"></button>
+              <button class="bgsw" data-bg="bg-grey" style="background:#89898e" title="Grey"></button>
+              <button class="bgsw" data-bg="night" style="background:#0d0d0f" title="Black"></button>
+            </span>
+          </span>
+          <button class="ctl" id="btnDrift" title="Auto-drift">≈<span class="dlbl"> Drift</span></button>
+          <button class="ctl regs-toggle" id="regsToggle" title="Drift settings" aria-label="Drift settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11"/><path d="M20 6h1"/><circle cx="17" cy="6" r="2.2"/><path d="M3 12h4"/><path d="M13 12h8"/><circle cx="10" cy="12" r="2.2"/><path d="M3 18h9"/><path d="M18 18h3"/><circle cx="15" cy="18" r="2.2"/></svg></button>
+          <span class="regs" id="regs">
+          <span class="reg reg-speed" title="Drift speed — how fast the cloud drifts">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5.8 19.5a8.6 8.6 0 1 1 12.4 0"/><path d="M12 13.2l4.4-3.7"/><circle cx="12" cy="13.2" r="1.5" fill="currentColor" stroke="none"/></svg>
+            <span class="rlbl">Speed</span>
+            <input type="range" class="speed" id="driftSpeed" min="0.12" max="1" step="0.02" value="0.3" aria-label="Drift speed">
+          </span>
+          <span class="reg reg-depth" title="Drift depth — flat ↔ deep-dive (zoom in / out)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l8-6 8 6M4 15l8 6 8-6"/></svg>
+            <span class="rlbl">Depth</span>
+            <input type="range" class="speed depth" id="driftDepth" min="0" max="1" step="0.05" value="0.5" aria-label="Drift depth">
+          </span>
+          <span class="reg reg-focus" title="Focus plane — near = fog / far = every layer clear">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 3.5 8 12 12.8 20.5 8z"/><path d="M3.5 12 12 16.8 20.5 12"/><path d="M3.5 16 12 20.8 20.5 16"/></svg>
+            <span class="rlbl">Focus</span>
+            <input type="range" class="speed focus" id="focusPlane" min="0" max="1" step="0.05" value="1" aria-label="Focus plane / depth of field">
+          </span>
+          </span>
+          <button class="ctl" id="btnFull" title="Fullscreen / minimise">⤢</button>
+        </span>
+      </div>
+
+      <div class="pad">
+        <button class="ctl rotl" data-rot="left"  title="Rotate left — walk around the cloud"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4.5V8.5h4"/></svg></button>
+        <button class="ctl up"    data-dir="up">▲</button>
+        <button class="ctl rotr" data-rot="right" title="Rotate right — walk around the cloud"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V8.5h-4"/></svg></button>
+        <button class="ctl left"  data-dir="left">◀</button>
+        <button class="ctl down"  data-dir="down">▼</button>
+        <button class="ctl right" data-dir="right">▶</button>
+      </div>
+      <div class="padnote"><button class="padnote-x" id="padnoteX" title="Hide">✕</button>Press <svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4.5V8.5h4"/></svg> / <svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V8.5h-4"/></svg>, or hold ⇧ Shift + drag (or 3-finger drag), to walk around the cloud</div>
+      <div class="zoomer">
+        <button class="ctl" data-zoom="in"  title="Zoom in">＋</button>
+        <button class="ctl" data-zoom="out" title="Zoom out">－</button>
+        <button class="ctl" id="btnShuffle" title="Shake / reorder the cloud"></button>
+        <button class="ctl" id="btnReset" title="Fit in view"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg></button>
+      </div>
+      <div class="hint" id="hint">Drag to move · Shift-drag, middle-drag, 3-finger drag, ↺ ↻ or Q/E to walk around · scroll to zoom · click a photo</div>
+      <div class="drift-msg" id="driftMsg"><span class="wv">≈</span><span id="driftMsgTxt"></span></div>
+    </div>
+
+    <div class="panel" id="panel">
+      <button class="x" id="panelX">✕</button>
+      <div class="phead">
+        <div class="ttl" id="pTitle"></div>
+        <div class="yr" id="pYear"></div>
+        <a class="pseries" id="pSeries" target="_blank" rel="noopener"></a>
+        <div class="pdrop" id="pDrop">
+          <button class="psum" id="pSum" type="button">About the series</button>
+        </div>
+      </div>
+      <div class="pscroll" id="pScroll">
+        <div class="pbody" id="pBody"><div class="desc" id="pDesc"></div><div class="descx" id="pExtra"></div><button class="pmore" id="pMore" type="button">Read more</button></div>
+      </div>
+      <div class="tsize"><button class="tszbtn" id="tszDn" type="button" aria-label="Smaller text">A−</button><button class="tszbtn" id="tszUp" type="button" aria-label="Larger text">A+</button></div>
+    </div>
+
+    <div class="loading" id="loading">Loading…</div>
+    <div class="mobile-note" id="mobileNote"><div class="mn-box">
+      <div class="mn-txt">For the best experience, view this on a computer or a tablet.</div>
+      <button class="mn-ok" id="mobileNoteOk">Got it</button>
+    </div></div>
+  </div>
+
+  <hr class="sep">
+  <section class="seq" id="seq"><h2>All works in this series</h2></section>
+  <div class="foot">Prototype · CSS‑3D photo cloud · images streamed directly from Cloudflare</div>
+</main>
+
+<script>
+/* ================================================================== *
+ *  PHOTO CLOUD — prototype (CSS-3D, no WebGL / no CORS dependency)
+ * ================================================================== */
+const C = "https://cloud.teimur-bek-safiuli.com/";
+const SERIES = [
+  { id:"sea-pictures", name:"Sea Pictures", sub:"Part of the project The Act of Looking — 2025",
+    desc:"Part of The Act of Looking, devoted to the phenomenology of gaze. Shot on European coasts, it omits faces and stages the act of contemplation itself — people seeing something we cannot.",
+    descFull:"<p><em>Sea Pictures</em> is part of <em>The Act of Looking</em>, a project devoted to the phenomenology of gaze. The series reflects on the conditions that trigger the very act of “deep looking” — from the everyday spectacles people linger on (fire, work sites, water) to more specific obsessions such as highways viewed from bridges or the ocean at night.</p><p>Shot on various coasts in Europe, it deliberately omits faces and focuses on the act of contemplation itself, showing only people who are seeing something we cannot. We never know whether their attention is directed outward toward the sea or inward toward memory and feeling.</p><p>The series stages different types of gaze and insists on a paradox: what you look at is not always what you see.</p>",
+    photos:[
+      ["Sea-Pictures/Sea%20Pictures%20(Dominique-f)_s.jpg","Sea Pictures (Dominique)_FR-LM2","2025"],
+      ["Sea-Pictures/Sea%20Pictures%20(Arnault%20%26%20Fre%CC%81de%CC%81rique)_s.jpg","Sea Pictures (Arnault & Frédérique)_FR-OUI","2025"],
+      ["Sea-Pictures/Sea%20Picture%20(Dominique-m)_s.jpg","Sea Pictures (Dominique)_FR-LM2","2025"],
+      ["Sea-Pictures/Sea%20Pictures%20(Gre%CC%81gory%20with%20His%20Dog)_s.jpg","Sea Pictures (Grégory with His Dog)_FR-OUI","2025"],
+      ["Sea-Pictures/Sea%20Picture%20(Helene%20%26%20Isabelle)_s.jpg","Sea Pictures (Hélène & Isabelle)_FR-LM2","2025"],
+      ["Sea-Pictures/Sea%20Pictures%20(Man%20with%20a%20Skateboard)_s.jpg","Sea Pictures (Man with a Skateboard)_FR-OUI","2025"],
+      ["Sea-Pictures/Sea%20Picture%20(Patrice)_s.jpg","Sea Pictures (Patrice)_FR-LM2","2025"],
+      ["Sea-Pictures/Sea%20Pictures%20(Sevraine%20%26%20Gilles)_s.jpg","Sea Pictures (Sevraine & Gilles)_FR-LM2","2025"],
+      ["Sea-Pictures/Sea%20Pictures%20(Two%20Women%20with%20a%20Dog)_s.jpg","Sea Pictures (Two Women with a Dog)_FR-LM2","2025"],
+    ]},
+  { id:"lilienstrasse", name:"Lilienstraße", sub:"Portraits & testimonies from Brandenburg — 2024",
+    desc:"An unbiased collection of societal positions in post-reunification Eastern Germany. Continuing August Sander's typological tradition, it asks what visually constitutes a homo politicus.",
+    descFull:"<p>An unbiased collection of societal positions in post-reunification Eastern Germany. Continuing the typological tradition of August Sander, <em>Lilienstraße</em> asks what visually constitutes a homo politicus.</p><p>Each portrait pairs a person with a statement of their own conviction — on war and peace, culture, fear, solidarity and belonging — holding contradictory voices side by side without judgement, so that the viewer meets a community through the frictions that run across it.</p>",
+    photos:[
+      ["lilienstrasse/DEADR_2024_FS(WIR%20SIND%20JETZT%20AN%20EINEM%20SCHEIDEWEG.%20KRIEG%20ODER%20FRIEDEN.)_s.jpg","DE-ADR_2024_FS — “We are at a crossroads. War or peace.”","2024"],
+      ["lilienstrasse/DERNR_2024_LNAX(AUS%20DEM%20SCHOCK%20RAUS.%20FRUST%20ZUM%20KAMPF%20NUTZEN.)_s.jpg","DE-RNR_2024_LNAX — “Shake off the shock. Use frustration for the fight.”","2024"],
+      ["lilienstrasse/DEWDZ_2024_E(MENS%20SANA%20IN%20CORPORE%20SANO.%20GEMEINSINN%20STA%CC%88RKEN.)_s.jpg","DE-WDZ_2024_E — “A healthy mind in a healthy body.”","2024"],
+      ["lilienstrasse/DEWDZ_2024_AMM(EINE%20WELT%2C%20EINE%20FAMILIE.%20DIVERS%2C%20UND%20DOCH%20VEREINT.)_s.jpg","DE-WDZ_2024_AMM — “One world, one family. Diverse, yet united.”","2024"],
+      ["lilienstrasse/DEADR_2024_LS(ES%20GIBT%20KEIN%20LEBEWESEN%2C%20DAS%20SO%20WISSENTLICH%20SELBSTZERSTO%CC%88RERISCH%20IST%20WIE%20DER%20MENSCH.)_s.jpg","DE-ADR_2024_LS — “No living being is as knowingly self-destructive as humans.”","2024"],
+      ["lilienstrasse/DERNR_2024_NC(LEBT%20WIE%20IHR%20SEID%20UND%20LIEBT%20WEN%20IHR%20WOLLT.)_s.jpg","DE-RNR_2024_NC — “Live as you are and love whom you want.”","2024"],
+      ["lilienstrasse/DEWER_2024_M(MINDERWERTIGKEITSGEFU%CC%88HL%20HERRSCHT.%20ANGST%20ZERSTO%CC%88RT%20TRA%CC%88UME.)_s.jpg","DE-WEU_2024_M — “Inferiority complex rules. Fear destroys dreams.”","2024"],
+      ["lilienstrasse/DERNR_06-2024_AAR(SYMPATHIEN%20FU%CC%88R%20RECHTSEXTREME%20MACHEN%20UNS%20SORGEN.)_s.jpg","DE-RNR_2024_AAR — “Sympathies for right-wing extremists worry us.”","2024"],
+      ["lilienstrasse/DEWEU_2024_SM(NICHT%20VON%20DER%20POLITIK%20AUSGENUTZT%20WERDEN)_s.jpg","DE-WEU_2024_SM — “Don't get exploited by politics.”","2024"],
+      ["lilienstrasse/DEWEU_2024_BL(_DER%20FRIEDEN%20IST%20NICHT%20ALLES%2C%20ABER%20ALLES%20IST%20OHNE%20DEN%20FRIEDEN%20NICHTS._%20%E2%80%93%20WB)_s.jpg","DE-WEU_2024_BL — “Peace is not everything, but without peace, everything is nothing.” (W. Brandt)","2024"],
+      ["lilienstrasse/DEEBW_2024_DD(JEDER%20HAT%20DAS%20RECHT%20AUF%20SEINE%20KULTUR.%20AUCH%20IN%20DEUTSCHLAND%20MUSS%20DAS%20GELTEN.)_s.jpg","DE-EBW_2025_DD — “Everyone has the right to their culture.”","2025"],
+    ]},
+  { id:"all", name:"All", sub:"How singular images construct knowledge — 2024",
+    desc:"All examines how images construct knowledge and representation, questioning whether a single photograph can symbolise complex social and historical realities.",
+    descFull:"<p><em>All</em> examines how images construct knowledge and representation, questioning the ability of singular photographs to symbolise complex social and historical realities.</p><p>By reconnecting photography to the local studios, video stores and rural bus stops where images were once conceived, produced, circulated and seen, it reflects on how the photographic process itself shapes the image — and raises critical questions about the ethics of photographic (re)production and distribution.</p>",
+    photos:[
+      ["All/All%20Photography%20Studios_s.jpg","All Photography Studios (Tous les Studios Photographiques)","2024"],
+      ["All/All%20Movie%20Stores_s.jpg","All Movie Stores (Alle Videotheken)","2024"],
+      ["All/All%20Public%20Stops%20in%20the%20Countryside_s.jpg","All Public Stops in the Countryside, I","2025"],
+    ]},
+  { id:"unpinning", name:"Unpinning the Angelus Novus", sub:"History & catastrophe after Paul Klee — 2022",
+    desc:"A reflection on history and catastrophe through Klee's Angelus Novus — the 'Soldier-Liberator' stained-glass panel at Museum Berlin-Karlshorst, seen from several viewpoints.",
+    descFull:"<p>A reflection on history, catastrophe and perception through Paul Klee's <em>Angelus Novus</em>. “Unpinning the Angelus Novus's wings from the storm of Paradise becomes, for me, an allegory of unwrapping history — turning the gaze toward the future after an eternity spent contemplating the past. We can no longer unconsciously carry the artifacts of the past into our present without adopting the perspective of this angel, pausing to see events not merely as a sequence but as catastrophes.” — TBS</p><p>The work centres on the “Soldier-Liberator” stained-glass panel at Museum Berlin-Karlshorst, presented from several viewpoints.</p>",
+    photos:[
+      ["Unpinning%20the%20Angelus%20Novus/Unpinning%20the%20Stained-Glass%20Mosaic%20Panel%20'Soldier-Liberator'/Soldier-Liberator_mainview.jpg","Unpinning the ‘Soldier-Liberator’. Frontal View","2022"],
+      ["Unpinning%20the%20Angelus%20Novus/Unpinning%20the%20Stained-Glass%20Mosaic%20Panel%20'Soldier-Liberator'/Soldier-Liberator_view1.jpg","Unpinning the ‘Soldier-Liberator’. Side View","2022"],
+      ["Unpinning%20the%20Angelus%20Novus/Unpinning%20the%20Stained-Glass%20Mosaic%20Panel%20'Soldier-Liberator'/Soldier-Liberator_view2_render.jpg","Unpinning the ‘Soldier-Liberator’. Render View","2022"],
+    ]},
+  { id:"perfect-curve", name:"The Perfect Curve", sub:"Reenacted memories as film stills — 2025",
+    desc:"Anthropological research among rural drivers in Brandenburg: recalled emotional moments on the road, reenacted as imaginary film stills with subtitles.",
+    descFull:"<p>Anthropological research among rural drivers in Brandenburg. Recalled emotional moments on the road are reenacted as imaginary film stills with subtitles.</p><p>Staging private memory as cinema, the series asks how landscape, routine and feeling fold into one another behind the wheel.</p>",
+    photos:[
+      ["The%20Perfect%20Curve/The%20Perfect%20Spot%2C%20%231_s.jpg","The Perfect Spot, #1","2025"],
+    ]},
+  { id:"attachment-toys", name:"Attachment Toys", sub:"Nature toys & forest pedagogy — 2023–",
+    desc:"Examines attachment, imagination and care through children's relationships with found natural objects, contrasting open-ended play with accelerated consumption.",
+    descFull:"<p>Stuffed animals and blankets are often attachment toys for children, providing comfort when needed. For children attending forest kindergartens or living in remote woodland communities, attachment toys often include natural objects like sticks, tree branches, willow rods, plant roots and chestnut seeds. These “toys” promote a truly recycling economy and offer the best understanding of life and death in nature.</p><p>In the artistic research project <em>Attachment Toys</em>, we showcase a spectrum of such “nature toys” and draw parallels with the rapidly growing world of fast-consuming toys, which tend to serve only one function. In contrast, sustainable, nature-found toys provide a flexible, time-based medium for infinite exploration and creativity — a long-term project with several forest kindergartens across Europe.</p>",
+    photos:[
+      ["attachment-toys/Toy%231_nest%2C%20tree%20branch%2C%20forest%2C%20stem%2C%20twig_s.jpg","Toy#1_nest, tree branch, forest, stem, twig","2024"],
+      ["attachment-toys/Toy%232_field%2C%20grass%2C%20forest%2C%20crop%2C%20grassland%2C%20swamp_s.jpg","Toy#2_field, grass, forest, crop, grassland, swamp","2024"],
+      ["attachment-toys/Toy%233_plant%2C%20hand%2C%20bouquet%2C%20bundle%2C%20floral%20arrangement_s.jpg","Toy#3_plant, hand, bouquet, bundle, floral arrangement","2024"],
+      ["attachment-toys/Toy%234_forest%2C%20branch%2C%20log%2C%20tree%20trunk%2C%20habitat_s.jpg","Toy#4_forest, branch, log, tree trunk, habitat","2024"],
+    ]},
+  { id:"dinosaurs-of-misfortune", name:"Dinosaurs of Misfortune", sub:"Cars as metallic creatures — 2023–",
+    desc:"Cars hidden in darkness or motionless in traffic, stripped of their function, become glistening metallic creatures against the backdrop of nature.",
+    descFull:"<p>“There is something animalistic, even uncanny, about cars hidden in darkness or motionless in a traffic jam. Stripped of their primary function, they become tight capsules of odors, sounds, humidity and softness, preserved only until movement resumes. Capturing these fragile moments of forced idleness — this transformation into glistening, metallic creatures exuding scent and light against the backdrop of nature — is what captivates me. And all this, beyond witnessing how <em>non-places</em> (as described by Marc Augé) suddenly transform into vibrant terrains of life.” — TBS</p>",
+    photos:[
+      ["Dinosaurs-of-Misfortune/Dinosaurs%20of%20Misfortune%2C%20%231.jpg","Dinosaurs of Misfortune, #1",""],
+      ["Dinosaurs-of-Misfortune/Dinosaurs%20of%20Misfortune%2C%20%232.jpg","Dinosaurs of Misfortune, #2",""],
+      ["Dinosaurs-of-Misfortune/Dinosaurs%20of%20Misfortune%2C%20%233.jpg","Dinosaurs of Misfortune, #3",""],
+      ["Dinosaurs-of-Misfortune/Dinosaurs%20of%20Misfortune%2C%20%234.jpg","Dinosaurs of Misfortune, #4",""],
+      ["Dinosaurs-of-Misfortune/Dinosaurs%20of%20Misfortune%2C%20%235.jpg","Dinosaurs of Misfortune, #5",""],
+    ]},
+  { id:"this-image", name:"This Image", sub:"Image, photograph & text — 2009–2024",
+    desc:"Examines the phenomenological distinctions between the image, the photograph and the text meant to explain it — the void between an image and its description.",
+    descFull:"<p><em>This Image</em> examines the phenomenological distinctions between the image, the photograph and the text intended to explain its visual counterpart. These visual-textual formulas — ubiquitous online — often falter due to their generalization and reductive nature, obscuring context and generating ambiguity.</p><p>The project interrogates the role of the image as a poster, a cover, a stamp, a sign or a narrative, while scrutinizing its interaction with describing text — resonating with the practices of Lawrence Weiner, Barbara Kruger, Guerrilla Girls, Ed Ruscha and Klaus Staeck.</p>",
+    photos:[
+      ["This%20Image/This%20Image.%20Untitled%2C%20%231.jpg","This Image. Untitled #1",""],
+      ["This%20Image/This%20Image.%20Untitled%2C%20%232.jpg","This Image. Untitled #2",""],
+      ["This%20Image/This%20Image.%20Untitled%2C%20%233.jpg","This Image. Untitled #3",""],
+      ["This%20Image/This%20Image.%20Untitled%2C%20%234.jpg","This Image. Untitled #4",""],
+      ["This%20Image/This%20Image.%20Untitled%2C%20%235.jpg","This Image. Untitled #5",""],
+      ["This%20Image/This%20Image.%20Untitled%2C%20%236.jpg","This Image. Untitled #6",""],
+    ]},
+  { id:"versos", name:"versos, #1", sub:"Campaign posters, blank verso — 2024",
+    desc:"Local politicians hanging their campaign posters, shown only from the blank white “verso” — the political message reduced to a form without content.",
+    descFull:"<p>Initiated during the 2024 elections for the 8th Brandenburg State Parliament, <em>versos, #1</em> is the first edition of the wider <em>versos</em> project. It captures local politicians in the act of hanging their campaign posters, but by exposing only the blank, white “verso” of the placards, the political message is reduced to a form without content.</p><p>This deliberate erasure recursively overlaps three dimensions: the natural person, their performative act of image-making, and the emptied medium itself. As the project continues across future elections in Europe, it strictly avoids propagating any specific party or philosophy — reflecting instead on how the political image is constructed, revealing the human face behind the societal role.</p>",
+    photos:[
+      ["versos/versos_DE-BB_WR_s.jpg","versos_DE-SFT_WR","2024"],["versos/versos_DE-BB_TLu%CC%88_s.jpg","versos_DE-LWE_TLü","2024"],
+      ["versos/versos_DE-BB_AJ_s.jpg","versos_DE-BB_AJ","2024"],["versos/versos_DE-BB_AT_s.jpg","versos_DE-FAK_AT","2024"],
+      ["versos/versos_DE-BB_MW_s.jpg","versos_DE-SDT_MW","2024"],["versos/versos_DE-BB_KD_s.jpg","versos_DE-CLA_KD","2024"],
+      ["versos/versos_DE-BB_AK_s.jpg","versos_DE-FFO_AK","2024"],["versos/versos_DE-BB_MMS_s.jpg","versos_DE-RNR_MMS","2024"],
+      ["versos/versos_DE-BB_ICA_s.jpg","versos_DE-WDZ_ICA","2024"],["versos/versos_DE-BB_EH_s.jpg","versos_DE-WTF_EH","2024"],
+      ["versos/versos_DE-BB_FV_s.jpg","versos_DE-SNI_FV","2024"],["versos/versos_DE-BB_SW_s.jpg","versos_DE-POT_SW","2024"],
+      ["versos/versos_DE-BB_BBH_s.jpg","versos_DE-RNR_BBH","2024"],["versos/versos_DE-BB_AB_s.jpg","versos_DE-SFT_AB","2024"],
+      ["versos/versos_DE-BB_HM_s.jpg","versos_DE-RZE_HM","2024"],["versos/versos_DE-BB_ESt_s.jpg","versos_DE-JBG_ESt","2024"],
+      ["versos/versos_DE-BB_FD_s.jpg","versos_DE-NGB_FD","2024"],["versos/versos_DE-BB_LW_s.jpg","versos_DE-ORA_LW","2024"],
+      ["versos/versos_DE-BB_TWe_s.jpg","versos_DE-BBG_TWe","2024"],["versos/versos_DE-BB_MH_s.jpg","versos_DE-RNR_MH","2024"],
+      ["versos/versos_DE-BB_TWi_s.jpg","versos_DE-EBW_TWi","2024"],["versos/versos_DE-BB_KF_s.jpg","versos_DE-EBW_KF","2024"],
+      ["versos/versos_DE-BB_PT_s.jpg","versos_DE-TEM_PT","2024"],["versos/versos_DE-BB_CLH_s.jpg","versos_DE-RGF_CLH","2024"],
+      ["versos/versos_DE-BB_MS_s.jpg","versos_DE-TEM_MS","2024"],["versos/versos_DE-BB_IS_s.jpg","versos_DE-BFM_IS","2024"],
+      ["versos/versos_DE-BB_JSch_s.jpg","versos_DE-VEJ_JSch","2024"],["versos/versos_DE-BB_WZ_s.jpg","versos_DE-DOK_WZ/EZ","2024"],
+      ["versos/versos_DE-BB_JS_s.jpg","versos_DE-POT_JS","2024"],["versos/versos_DE-BB_AL_s.jpg","versos_DE-WQU_AL","2024"],
+      ["versos/versos_DE-BB_GK_s.jpg","versos_DE-COT_GK","2024"],["versos/versos_DE-BB_RF_s.jpg","versos_DE-COT_RF","2024"],
+      ["versos/versos_DE-BB_BL_s.jpg","versos_DE-ORA_BL","2024"],["versos/versos_DE-BB_IV_s.jpg","versos_DE-POT_IV","2024"],
+      ["versos/versos_DE-BB_TL_s.jpg","versos_DE-NGB_TL","2024"],["versos/versos_DE-BB_TD_s.jpg","versos_DE-PEB_TD","2024"],
+      ["versos/versos_DE-BB_SG_s.jpg","versos_DE-WEU_SG","2024"],["versos/versos_DE-BB_SR_s.jpg","versos_DE-TLT_SR","2024"],
+      ["versos/versos_DE-BB_ES_s.jpg","versos_DE-ZAD_ES","2024"],["versos/versos_DE-BB_KT_s.jpg","versos_DE-LMU_KT","2024"],
+      ["versos/versos_DE-BB_UA_s.jpg","versos_DE-FAK_UA","2024"],["versos/versos_DE-BB_AKr_s.jpg","versos_DE-SDT_AKr","2024"],
+      ["versos/versos_DE-BB_AH_s.jpg","versos_DE-WEU_AH","2024"],["versos/versos_DE-BB_DN_s.jpg","versos_DE-TNR_DN","2024"],
+      ["versos/versos_DE-BB_MG_s.jpg","versos_DE-ADR_MG","2024"],
+    ]},
+];
+const SITE = "https://teimur-bek-safiuli.com";
+const SLUG = {"sea-pictures":"sea-pictures","lilienstrasse":"lilienstrasse","all":"all","unpinning":"unpinning-the-angelus-novus","perfect-curve":"the-perfect-curve"};
+SERIES.forEach(s=>{ s.url=SITE+"/works/"+(SLUG[s.id]||s.id); });
+
+let PILLS=[];
+function buildData(list){                       // normalise raw series list -> cloud-ready
+  let uid=0;
+  list.forEach(s=>{ const full=s.descFull||('<p>'+(s.desc||'')+'</p>'); const m=full.match(/<p[\s\S]*?<\/p>/i); const shortH=m?m[0]:full;
+    s.photos=s.photos.map(p=>({ url:p.url||(C+p[0]), title:p.title||p[1]||'', year:p.year||p[2]||'',
+    id:uid++, desc:s.desc, descShort:shortH, descLong:full, series:s.name, seriesUrl:s.url })); });
+  const all={ id:"__all__", name:"All series", sub:"Every work across all series", url:SITE+"/works",
+    desc:"A single cloud of every photograph across all series.", photos:list.flatMap(s=>s.photos) };
+  PILLS=[all, ...list];
+}
+
+/* Auto-discovery — when embedded ON the site the module is same-origin with the works
+ * pages, so it reads them (and the Cloudflare image URLs, titles, descriptions) live:
+ * add a series or photo on the website and the cloud picks it up, no manual input.
+ * Opened stand-alone (cross-origin) the fetch is blocked, so we fall back to bundled data. */
+async function discoverFromSite(){
+  const base=(location.origin&&location.origin.startsWith('http'))?location.origin:SITE;
+  const idx=new DOMParser().parseFromString(await (await fetch(base+"/works")).text(),"text/html");
+  const slugs=[...new Set([...idx.querySelectorAll('a[href*="/works/"]')]
+    .map(a=>a.getAttribute('href')).filter(h=>/\/works\/[^\/#?]+$/.test(h))
+    .map(h=>h.replace(/.*\/works\//,'').replace(/[#?].*/,'')))];
+  const out=[];
+  for(const slug of slugs){
+    try{
+      const d=new DOMParser().parseFromString(await (await fetch(base+"/works/"+slug)).text(),"text/html");
+      const h1s=[...d.querySelectorAll('h1')].filter(h=>!h.closest('header'));
+      const name=((h1s[h1s.length-1]||h1s[0]||{}).textContent||slug).trim();
+      const pEls=[...d.querySelectorAll('p')].filter(p=>p.textContent.trim().length>60);
+      const desc=pEls[0]?pEls[0].textContent.trim():'';                       // short = first paragraph, plain
+      const descFull=pEls.map(p=>'<p>'+p.innerHTML.trim()+'</p>').join('');   // long = the site's own formatting, kept 1:1
+      const seen=new Set(), photos=[];
+      [...d.querySelectorAll('img')].forEach(im=>{ const u=im.currentSrc||im.src;
+        if(!/cloud\.teimur-bek-safiuli\.com/.test(u)||seen.has(u)) return; seen.add(u);
+        const box=(im.closest('a')&&im.closest('a').parentElement)||im.parentElement;
+        const ym=((box&&box.textContent)||'').match(/\b(19|20)\d{2}\b/);
+        photos.push({ url:u, title:(im.getAttribute('title')||im.getAttribute('alt')||'').trim(), year:ym?ym[0]:'' }); });
+      if(photos.length) out.push({ id:slug, name, sub:'', desc, descFull, url:base+"/works/"+slug, photos });
+    }catch(e){}
+  }
+  return out;
+}
+
+const PERSP=1100;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=e=>e*e*e*(e*(e*6-15)+10);   // smootherstep — gentle acceleration in and out
+const KEYMAP={ArrowUp:{dir:'up'},w:{dir:'up'},ArrowDown:{dir:'down'},s:{dir:'down'},
+  ArrowLeft:{dir:'left'},a:{dir:'left'},ArrowRight:{dir:'right'},d:{dir:'right'},
+  q:{rot:'left'},e:{rot:'right'},                                    // Q / E → walk around (orbit) the cloud
+  '+':{zoom:'in'},'=':{zoom:'in'},'-':{zoom:'out'},'_':{zoom:'out'}};
+
+/* ------------------------------ cloud engine ------------------------------ */
+class PhotoCloud{
+  constructor(block){
+    this.block=block; this.scene=block.querySelector('#scene'); this.world=block.querySelector('#world');
+    this.items=[]; this.loadedIds=new Set(); this.total=0;
+    this.pan={x:0,y:0}; this.z=0; this.scale=1; this.rx=0; this.ry=0;
+    this.orbit={x:0,y:0}; this.torbit={x:0,y:0};            // border-orbit: pushing an edge rotates the whole cloud
+    this.t={x:0,y:0,s:1,rx:0,ry:0};                          // s = target world scale (zoom); infinite zoom-in
+    this.mode='free'; this.focusItem=null; this.dim=0; this.saved=null; this.focusTimer=null;
+    this.pointers=new Map(); this.panning=false; this.rotating=false; this.pinch=0; this.moved=0; this.downT=0;
+    this.hold=null; this.holdBtn=null; this.holdKey=null; this.keys=new Set(); this.holdVel=0; this.holdLast=null;
+    this.orbitHold=false; this.lastInput=performance.now(); this.lastFrame=performance.now();
+    this.drift=false; this.driftStart=0; this.dphase=0; this.countdown=null; this.driftSpeed=0.3; this.driftDepth=0.5; this.focusPlane=1;
+    this.lastPX=0; this.lastPY=0; this.tw={active:false}; this.showText=true; this.reveal=1;
+    // layout params (set per load)
+    this.spread={x:700,y:400}; this.scaleFit=0.5; this.scaleMin=0.1; this.scaleMax=200;
+    this.driftPanX=300; this.driftPanY=180;
+    this._bind(); this._loop();
+  }
+
+  load(photos,quiet){
+    this.world.innerHTML=''; this.items=[]; this.loadedIds=new Set(); this.total=photos.length; this.reveal=0; this._bbOn=false;
+    const loading=document.getElementById('loading'); if(!quiet){ loading.classList.remove('gone'); loading.textContent='Loading…'; }
+    const n=photos.length;
+    const SX=clamp(560+n*58,820,2800), SY=SX*0.56;   // much bigger spread → real air between works, so back ones aren't buried
+    this.spread={x:SX,y:SY};
+    this.zBack=-clamp(SX*0.5,440,1100); this.zFront=clamp(SX*0.16,110,340);   // deeper layering → rotating/parallax pulls overlapping works apart
+    const W=this.block.clientWidth||1200;
+    const pos=this._positions(n);
+    photos.forEach((p,i)=>{                           // one plane per photo — NO duplicates
+      const el=document.createElement('div'); el.className='photo';
+      const x=pos[i].x, y=pos[i].y, z=pos[i].z;        // depth-layered so angled planes never cross
+      const h=clamp(545-n*4,375,595)+(Math.random()*2-1)*55;   // keep works a good size (air comes from the wider spread, not from shrinking them)
+      // photos face the camera (billboard) + a small Y offset & tilt for organic feel → you can orbit a full 360° and always see them
+      const bx=(Math.random()<.5?-1:1)*(4+Math.random()*6), byoff=(Math.random()*2-1)*14, rz=(Math.random()*2-1)*3;
+      const item={el,x,y,z,p,h,bx,byoff,rz,_dN:clamp((z-this.zBack)/((this.zFront-this.zBack)||1),0,1)}; el._item=item;
+      const img=new Image();
+      img.onload=()=>{ const a=img.naturalWidth/img.naturalHeight||0.7; el.style.width=(h*a)+'px'; el.style.height=h+'px';
+        if(!this.loadedIds.has(p.id)){ this.loadedIds.add(p.id); if(this.loadedIds.size>=this.total){ if(!quiet) this._hide(); this._refit(); } } };
+      img.onerror=()=>{ el.classList.add('broken'); el.style.width='150px'; el.style.height='200px'; el.textContent=p.title;
+        if(!this.loadedIds.has(p.id)){ this.loadedIds.add(p.id); if(this.loadedIds.size>=this.total){ if(!quiet) this._hide(); this._refit(); } } };
+      img.src=p.url; el.appendChild(img);
+      el.style.width=(h*0.7)+'px'; el.style.height=h+'px';
+      el.style.transform='translate3d('+x.toFixed(0)+'px,'+y.toFixed(0)+'px,'+z.toFixed(0)+'px) '+
+        'rotateY('+(byoff-this.orbit.x).toFixed(1)+'deg) rotateX('+bx.toFixed(1)+'deg) rotateZ('+rz.toFixed(1)+'deg) translate(-50%,-50%)';
+      this.world.appendChild(el); this.items.push(item);
+    });
+    this.scaleFit=clamp(this._fitScale(), 0.05, 1.6);   // scale that fits EVERY work (position + size + perspective) fully on screen → never cut off
+    this.scaleMin=this.scaleFit*0.16; this.scaleMax=this.scaleFit*900;
+    this.driftPanX=SX*this.scaleFit*0.55; this.driftPanY=SY*this.scaleFit*0.55;
+    this.resetView(true);
+    if(!quiet) setTimeout(()=>this._hide(),6000);
+  }
+  _hide(){ document.getElementById('loading').classList.add('gone'); }
+  _fitScale(){   // the largest scale at which EVERY work — its position + size + depth perspective — still fits inside the viewport
+    const W=this.block.clientWidth||1200, H=this.block.clientHeight||800, margin=0.93;
+    let mx=1, my=1;
+    for(const it of this.items){
+      const f=PERSP/(PERSP-it.z);                          // perspective magnifies works nearer the camera → they need more room
+      const hw=Math.max((it.el.offsetWidth||0)*0.5, it.h*0.8);   // ≥ the actual half-width AND ≥ a wide estimate → can never underestimate, so never cuts
+      const hh=Math.max((it.el.offsetHeight||0)*0.5, it.h*0.5);
+      mx=Math.max(mx, f*(Math.abs(it.x)+hw));
+      my=Math.max(my, f*(Math.abs(it.y)+hh));
+    }
+    return Math.min((W*0.5*margin)/mx, (H*0.5*margin)/my);
+  }
+  _refit(){   // real image sizes are known now → recompute the exact fit; if still parked at fit-view, ease to the corrected scale
+    const old=this.scaleFit||1; this.scaleFit=clamp(this._fitScale(),0.05,1.6);
+    this.scaleMin=this.scaleFit*0.16; this.scaleMax=this.scaleFit*900;
+    if(this.mode==='free' && !this.drift && this.countdown===null && Math.abs(this.scale-old)<old*0.08 && Math.abs(this.t.x)<10 && Math.abs(this.t.y)<10) this.t.s=this.scaleFit;
+  }
+  _positions(n){   // depth-layered: different layers are z-separated, same layer kept apart in x/y → angled planes never intersect
+    const SX=this.spread.x, SY=this.spread.y, zRange=this.zFront-this.zBack;
+    const L=Math.max(2,Math.min(7,Math.floor(zRange/230)+1));
+    const minXY=clamp(720-n*3,540,820)*0.98, perLayer=Array.from({length:L},()=>[]), out=[];   // enforce a clear gap so works never stack on top of each other
+    for(let i=0;i<n;i++){ const lk=i%L; let x,y,t=0;
+      do{ x=(Math.random()*2-1)*SX; y=(Math.random()*2-1)*SY; t++; }
+      while(t<200 && perLayer[lk].some(q=>Math.abs(x-q.x)<minXY&&Math.abs(y-q.y)<minXY));
+      perLayer[lk].push({x,y});
+      out.push({ x, y, z:this.zBack+(L>1?(lk/(L-1))*zRange:zRange/2)+(Math.random()*2-1)*22 });
+    }
+    return out;
+  }
+
+  resetView(instant){ this.mode='free'; this._stopDrift(); this.tw.active=false; this._closePanel(); this._closeFocusImg(); this.block.classList.remove('is-focus');
+    this.t={x:0,y:0,s:this.scaleFit,rx:0,ry:0}; this.torbit={x:0,y:0}; this.orbitHold=false;   // "fit in view" — also cancels drift + any held rotation
+    if(instant){ this.pan.x=0; this.pan.y=0; this.scale=this.scaleFit; this.rx=0; this.ry=0; this.orbit={x:0,y:0}; this._apply(); } }
+
+  /* ---- input ---- */
+  _bind(){
+    const s=this.scene;
+    s.addEventListener('pointerdown',e=>this._down(e));
+    s.addEventListener('mousedown',e=>{ if(e.button===1) e.preventDefault(); });   // stop the middle-click autoscroll bubble so middle-drag can rotate
+    s.addEventListener('pointermove',e=>this._move(e));
+    s.addEventListener('pointermove',e=>this._hover(e));
+    s.addEventListener('pointerleave',()=>this._clearHover());
+    window.addEventListener('pointerup',e=>this._up(e));
+    s.addEventListener('pointercancel',e=>this._up(e));
+    s.addEventListener('wheel',e=>this._wheel(e),{passive:false});
+    window.addEventListener('keydown',e=>this._key(e));
+    window.addEventListener('keyup',e=>this._keyUp(e));
+    this.block.querySelectorAll('[data-dir]').forEach(b=>{ const dir=b.dataset.dir;
+      b.addEventListener('pointerdown',e=>{e.preventDefault(); if(this.mode!=='free')return; this._input(); this.holdBtn={dir}; this.holdLast=this.holdBtn;}); });
+    this.block.querySelectorAll('[data-zoom]').forEach(b=>{ const zd=b.dataset.zoom;
+      b.addEventListener('pointerdown',e=>{e.preventDefault(); if(this.mode!=='free')return; this._input(); this.holdBtn={zoom:zd}; this.holdLast=this.holdBtn;}); });
+    this.block.querySelectorAll('[data-rot]').forEach(b=>{ const rd=b.dataset.rot;
+      b.addEventListener('pointerdown',e=>{e.preventDefault(); if(this.mode!=='free')return; this._input(); this.holdBtn={rot:rd}; this.holdLast=this.holdBtn;}); });
+    window.addEventListener('pointerup',()=>{ this.holdBtn=null; });
+  }
+  _input(){ this.lastInput=performance.now(); if(this.drift||this.countdown!==null) this._stopDrift(); }
+  _zoom(f,ax,ay){ const old=this.t.s; this.t.s=clamp(this.t.s/f,this.scaleMin,this.scaleMax);   // world scale → zoom-in never hits a hard limit
+    const r=this.t.s/old, AX=ax||0, AY=ay||0;                 // anchor (rel. to view centre); default 0,0 = centre. Wheel passes the cursor.
+    this.t.x=AX-(AX-this.t.x)*r; this.t.y=AY-(AY-this.t.y)*r;  // keep the point under the anchor fixed → zoom stays exactly where you zoomed
+    this._clampPan(); }
+  _clampPan(){ const S=Math.max(this.scale,this.t.s)||1, W=this.block.clientWidth||1200, H=this.block.clientHeight||800;
+    const lx=Math.max(0,this.spread.x*S-W*0.42)+W*0.16, ly=Math.max(0,this.spread.y*S-H*0.42)+H*0.16;   // always a little pan room so dragging responds even at fit-view; pure pan, never rotates
+    this.t.x=clamp(this.t.x,-lx,lx); this.t.y=clamp(this.t.y,-ly,ly);
+    this.pan.x=clamp(this.pan.x,-lx,lx); this.pan.y=clamp(this.pan.y,-ly,ly); }
+  _nudge(dir,px){ if(dir==='up')this.t.y+=px; else if(dir==='down')this.t.y-=px;
+    else if(dir==='left')this.t.x+=px; else if(dir==='right')this.t.x-=px; this._clampPan(); }
+
+  _down(e){ if(this.mode!=='free'){ this._closeFocus(); return; }
+    this._clearHover();
+    this.scene.setPointerCapture&&this.scene.setPointerCapture(e.pointerId);
+    this.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); this._input();
+    this.moved=0; this.pvx=0; this.pvy=0; this.downT=performance.now();   // reset inertia velocity on a fresh press
+    if(e.button===1||e.shiftKey){ this.rotating=true; this.panning=false; e.preventDefault&&e.preventDefault(); }   // MIDDLE-mouse or SHIFT+drag → rotate (works on any device/trackpad)
+    else if(this.pointers.size===1){ this.panning=true; this.rotating=false; this.block.classList.add('dragging'); }
+    if(this.pointers.size===2){ this.panning=false; this.rotating=false; this.pinch=this._pd(); }   // two fingers → pinch to zoom (no rotation, so pinch stays clean)
+    if(this.pointers.size>=3){ this.rotating=true; this.panning=false; }       // THREE-finger drag → rotate the whole cloud
+  }
+  _move(e){ if(!this.pointers.has(e.pointerId)) return;
+    const pr=this.pointers.get(e.pointerId); const dx=e.clientX-pr.x, dy=e.clientY-pr.y;
+    this.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); this._input();
+    if(this.rotating && this.mode==='free'){                 // middle-mouse / 3-finger → free rotation of the whole cloud (holds; full 360° horizontally)
+      this.torbit.x+=dx*0.16; this.torbit.y=clamp(this.torbit.y-dy*0.16,-40,40);   // gentler rotate sensitivity
+      this.moved+=Math.abs(dx)+Math.abs(dy); return; }
+    if(this.pointers.size>=2){ const d=this._pd(); if(this.pinch) this._zoom(this.pinch/d); this.pinch=d; return; }   // two-finger = clean pinch-zoom
+    if(this.panning && this.mode==='free'){                 // drag moves the TARGET (pan eases toward it → smooth start/stop), at reduced sensitivity
+      this.orbitHold=false; const k=0.72;
+      this.t.x+=dx*k; this.t.y+=dy*k; this.pvx=dx*k; this.pvy=dy*k; this._clampPan();   // remember velocity → glide to a stop on release
+      this.moved+=Math.abs(dx)+Math.abs(dy); }
+  }
+  _up(e){ if(!this.pointers.has(e.pointerId)) return;
+    const single=this.pointers.size===1, wasRot=this.rotating; this.pointers.delete(e.pointerId);
+    if(this.pointers.size<2){ this.pinch=0; this._pinchA=null; }
+    if(this.pointers.size===0){ this.panning=false; this.rotating=false; this.block.classList.remove('dragging');
+      if(single && !wasRot && e.button!==1 && this.moved<14 && performance.now()-this.downT<550 && this.mode==='free'){
+        const hit=this._hitAt(e.clientX,e.clientY); if(hit) this._focus(hit);
+      }
+    }
+  }
+  _pd(){ const a=[...this.pointers.values()]; return Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); }
+  _pang(){ const a=[...this.pointers.values()]; return Math.atan2(a[1].y-a[0].y,a[1].x-a[0].x); }   // angle between two fingers → twist to rotate
+  _hitAt(cx,cy){                                             // robust: walk the full front→back hit stack, take the first photo
+    const stack=document.elementsFromPoint(cx,cy);
+    for(const el of stack){ const ph=el.closest&&el.closest('.photo'); if(ph&&ph._item) return ph._item; }
+    let best=null,bestSz=-1e9;                               // fallback: nearest visible photo whose box contains the point
+    for(const it of this.items){ if((parseFloat(it.el.style.opacity)||1)<0.06) continue;
+      const r=it.el.getBoundingClientRect();
+      if(cx>=r.left&&cx<=r.right&&cy>=r.top&&cy<=r.bottom){ const sz=this.z+it.z; if(sz>bestSz){bestSz=sz;best=it;} } }
+    return best;
+  }
+  _hover(e){ this._hx=e.clientX; this._hy=e.clientY;                    // reliable hover via the same hit-test as clicks
+    if(this._hovRAF) return; this._hovRAF=requestAnimationFrame(()=>{ this._hovRAF=0; this._doHover(); }); }
+  _doHover(){ if(this.pointers.size || this.mode!=='free' || !this.showText){ this._clearHover(); return; }
+    const it=this._hitAt(this._hx,this._hy); if(it===this._hoverItem) return;
+    this._clearHover(); this._hoverItem=it; if(it) it.el.classList.add('hovered'); }
+  _clearHover(){ if(this._hoverItem){ this._hoverItem.el.classList.remove('hovered'); this._hoverItem=null; } }
+  _updateCapHud(){                                          // position the flat title pill at the hovered work's on-screen bottom → real backdrop-blur of the cloud behind it
+    const hud=this._capHud||(this._capHud=document.getElementById('capHud')); if(!hud) return;
+    const it=this._hoverItem;
+    if(it && this.mode==='free' && this.showText && !this.pointers.size){
+      const pr=it.el.getBoundingClientRect(), rc=this.block.getBoundingClientRect();
+      if(pr.width>1 && pr.bottom>rc.top && pr.top<rc.bottom){
+        if(hud._t!==it.p.title){ hud._t=it.p.title; hud.textContent=it.p.title; }
+        hud.style.left=(pr.left-rc.left+pr.width/2)+'px';
+        hud.style.top=(pr.bottom-rc.top+12)+'px';
+        hud.classList.add('show'); return;
+      }
+    }
+    hud.classList.remove('show');
+  }
+  _wheel(e){ e.preventDefault(); if(this.mode!=='free') return; this._input();
+    const rc=this.block.getBoundingClientRect(), ax=e.clientX-(rc.left+rc.width/2), ay=e.clientY-(rc.top+rc.height/2);   // anchor at the cursor
+    if(e.ctrlKey){ this._zoom(1+e.deltaY*0.007, ax, ay); return; }
+    const touchpad = e.deltaX!==0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY)<50;
+    if(touchpad && this.mode==='free'){ this.t.x-=e.deltaX*0.6; this.t.y-=e.deltaY*0.6; this.orbitHold=false; this._clampPan(); }   // gentler trackpad pan
+    else this._zoom(1+e.deltaY*0.0011, ax, ay);   // gentler wheel zoom
+  }
+  _key(e){
+    if(e.key==='Escape'){ if(this.mode!=='free') this._closeFocus(); else if(isFs()) exitFs(); return; }
+    if(this.mode!=='free') return;
+    const h=KEYMAP[e.key]; if(!h) return;
+    e.preventDefault(); if(e.repeat) return;                 // hold the key → the loop eases it smoothly; ignore OS auto-repeat (that was the staccato)
+    this.keys.add(e.key); this.holdKey=h; this.holdLast=h; this.orbitHold=false; this._input();
+  }
+  _keyUp(e){ if(!this.keys.has(e.key)) return; this.keys.delete(e.key);
+    this.holdKey = this.keys.size ? (KEYMAP[[...this.keys].pop()]||null) : null; }   // release → glide to a stop (loop coasts holdVel down)
+
+  /* ---- focus a photo (zoom in, dim rest, show crisp full-res image + panel) ---- */
+  _focus(item){
+    this.saved={x:this.pan.x,y:this.pan.y,s:this.scale,rx:this.rx,ry:this.ry,ox:this.orbit.x,oy:this.orbit.y};
+    const fs=clamp(this.scale*0.82, this.scaleFit*0.72, this.scaleMax);          // moderate zoom-out, relative to current zoom
+    const ry=(this.ry+this.orbit.x)*Math.PI/180;                                // KEEP the current rotation — don't spin back to the front each time
+    const wx=item.x*Math.cos(ry)+item.z*Math.sin(ry);                           // where the work actually is after that rotation → centre THAT
+    this.t={ x:-wx*fs, y:-item.y*fs, s:fs, rx:this.rx, ry:this.ry };            // leave orbit (torbit) untouched so a back-of-cloud photo opens in place
+    this.focusItem=item; this.mode='focus'; this._stopDrift(); this._tween(this.t,0.95); this.block.classList.add('is-focus');
+    document.getElementById('fog').classList.add('show');
+    if(this.showText) this._fillPanel(item);
+    const fi=document.getElementById('focusImg'); fi.querySelector('img').src=item.p.url;   // crisp full-res
+    clearTimeout(this.focusTimer); this.focusTimer=setTimeout(()=>fi.classList.add('show'),150);   // show reliably (no mode/timing race); _closeFocusImg clears it on close
+  }
+  _closeFocus(){ if(this.mode==='free') return; this.mode='return';
+    if(this.saved){ this.t={x:this.saved.x,y:this.saved.y,s:this.saved.s,rx:this.saved.rx,ry:this.saved.ry};
+      this.torbit={x:this.saved.ox||0,y:this.saved.oy||0}; }
+    this._tween(this.t,0.95); this._closePanel(); this._closeFocusImg();
+  }
+  _tween(to,dur){ this.tw={active:true, t0:performance.now(), dur:(dur||0.7)*1000,
+    from:{x:this.pan.x,y:this.pan.y,s:this.scale,rx:this.rx,ry:this.ry,ox:this.orbit.x,oy:this.orbit.y},
+    to:{x:to.x,y:to.y,s:to.s,rx:to.rx,ry:to.ry,ox:this.torbit.x,oy:this.torbit.y} }; }
+  _closePanel(){ document.getElementById('panel').classList.remove('open'); }
+  _fillPanel(item){
+    document.getElementById('pTitle').textContent=item.p.title;
+    document.getElementById('pYear').textContent=item.p.year;
+    const sl=document.getElementById('pSeries'); sl.textContent=(item.p.series||(current&&current.name)||'Series');
+    sl.href=item.p.seriesUrl||(current&&current.url)||'#'; sl.title='Open the series on the website';
+    const shortD=item.p.descShort||item.p.desc||(current&&current.desc)||'', longD=item.p.descLong||shortD;
+    const strip=s=>(s||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+    let extra=''; const fp=longD.match(/<p[\s\S]*?<\/p>/i);                  // everything after the first paragraph is the "read more" part
+    if(fp){ const i=longD.indexOf(fp[0]); extra=longD.slice(i+fp[0].length); } else if(strip(longD).length>strip(shortD).length+5) extra=longD;
+    const pd=document.getElementById('pDesc'), px=document.getElementById('pExtra'), pm=document.getElementById('pMore');
+    pd.innerHTML=shortD; px.innerHTML=extra; px.classList.remove('open'); px.style.maxHeight='0px'; pd._open=false;   // short paragraph stays put; extra slides open → no last-moment text swap
+    pm.textContent='Read more'; pm.style.display=strip(extra).length>4?'':'none';
+    document.getElementById('pDrop').classList.remove('open'); document.getElementById('pBody').style.maxHeight='0px';
+    document.getElementById('panel').classList.add('open');
+  }
+  _closeFocusImg(){ clearTimeout(this.focusTimer); document.getElementById('focusImg').classList.remove('show'); document.getElementById('fog').classList.remove('show'); }
+
+  /* ---- drift with countdown + smooth ease-in ---- */
+  _startCountdown(){ this.countdown=performance.now()+5000; document.getElementById('driftMsg').classList.add('show'); this._cdText(); }
+  _cdText(){ if(this.countdown===null) return; const n=Math.max(1,Math.ceil((this.countdown-performance.now())/1000));
+    document.getElementById('driftMsgTxt').textContent='Drift starting in '+n+'…'; }
+  _startDrift(){ this.countdown=null; document.getElementById('driftMsg').classList.remove('show');
+    this.drift=true; this.dphase=0; this.driftStart=performance.now();
+    this._dz0=this.scale; this._dcx0=-this.t.x/this.t.s; this._dcy0=-this.t.y/this.t.s;   // remember your zoom + centre → the smooth path eases IN from here, no snap
+    document.getElementById('btnDrift').classList.add('on'); }
+  _driftWaypoint(cx,cy){                                    // next nearby point along a gently curving heading → coherent wander that stays inside the cloud
+    let h=this._dhead!==undefined?this._dhead:Math.random()*6.283;
+    h+=(Math.random()-0.5)*0.32;                            // restrict the turn angle (≤±9°) → direction changes are always gentle
+    const step=this.spread.x*(0.75+Math.random()*0.3);      // long legs → few, committed turns
+    let wx=cx+Math.cos(h)*step, wy=cy+Math.sin(h)*step*0.62;
+    if(Math.hypot(wx,wy*1.6)>this.spread.x*0.8){ h=Math.atan2(-cy,-cx)+(Math.random()-0.5)*0.4; wx=cx+Math.cos(h)*step; wy=cy+Math.sin(h)*step*0.62; }   // near the edge → steer back toward the middle
+    this._dhead=h; return {wx,wy}; }
+  _stopDrift(){ this.drift=false; this.countdown=null; document.getElementById('driftMsg').classList.remove('show');
+    document.getElementById('btnDrift').classList.remove('on'); }
+  setText(on){ this.showText=on; this.block.classList.toggle('notext',!on);
+    const b=document.getElementById('btnText');
+    if(b){ b.classList.toggle('on',on); b.innerHTML=on?EYE:EYE_OFF;
+      b.title=on?'Titles & text shown — click to hide':'Titles & text hidden — click to show'; }
+    if(this.mode==='focus' && this.focusItem){ if(on) this._fillPanel(this.focusItem); else this._closePanel(); }   // toggle text while a photo is open → panel comes back too
+    else if(!on){ this._closePanel(); } }
+  shuffle(){                                                // "shake": blur in → reorder behind the fog → blur out (like series switch)
+    if(this.mode!=='free'||!this.items.length) return;
+    this.block.classList.add('shaking'); this._shuffling=true;
+    clearTimeout(this._shT);
+    this._shT=setTimeout(()=>{ this._reorder(); setTimeout(()=>{ this.block.classList.remove('shaking'); this._shuffling=false; },760); }, 660);
+  }
+  _reorder(){
+    const pos=this._positions(this.items.length);
+    this.items.forEach((it,i)=>{
+      const x=pos[i].x, y=pos[i].y, z=pos[i].z; it.x=x; it.y=y; it.z=z;
+      it._dN=clamp((z-this.zBack)/((this.zFront-this.zBack)||1),0,1);   // refresh cached depth so the fog fade follows the new layout
+      it.bx=(Math.random()<.5?-1:1)*(4+Math.random()*6); it.byoff=(Math.random()*2-1)*14; it.rz=(Math.random()*2-1)*3;
+      it.el.style.willChange='transform';                    // keep the GPU texture during the move → no white re-raster flash
+      it.el.style.transition='transform .8s cubic-bezier(.2,.8,.2,1)';
+      it.el.style.transform='translate3d('+x.toFixed(0)+'px,'+y.toFixed(0)+'px,'+z.toFixed(0)+'px) '+
+        'rotateY('+(it.byoff-this.orbit.x).toFixed(1)+'deg) rotateX('+it.bx.toFixed(1)+'deg) rotateZ('+it.rz.toFixed(1)+'deg) translate(-50%,-50%)';
+    });
+    this._opSig=''; this._bbLast=this.orbit.x;   // keep billboard in sync so it doesn't fight the reorder transition
+    clearTimeout(this._shClr); this._shClr=setTimeout(()=>this.items.forEach(it=>{ it.el.style.transition=''; it.el.style.willChange=''; }),900);
+  }
+
+  _apply(){ const rx=(this.rx+this.orbit.y), ry=(this.ry+this.orbit.x);   // orbit adds the border-rotation; photos keep their own upright transforms
+    const t='translate3d('+this.pan.x.toFixed(1)+'px,'+this.pan.y.toFixed(1)+'px,0) scale('+this.scale.toFixed(4)+') '+
+      'rotateX('+rx.toFixed(2)+'deg) rotateY('+ry.toFixed(2)+'deg)';
+    if(t!==this._tstr){ this._tstr=t; this.world.style.transform=t; } }   // skip the DOM write when nothing moved (perf)
+  _billboard(){                                              // keep every photo facing the camera as the world orbits → walk a full 360° and always see them
+    if(this._shuffling) return;
+    const ry=this.orbit.x;
+    if(this._bbOn && Math.abs(ry-this._bbLast)<0.04) return;   // only rewrite when the orbit angle actually changed (perf)
+    this._bbLast=ry; this._bbOn=true;
+    for(const it of this.items){
+      it.el.style.transform='translate3d('+it.x.toFixed(0)+'px,'+it.y.toFixed(0)+'px,'+it.z.toFixed(0)+'px) '+
+        'rotateY('+(it.byoff-ry).toFixed(2)+'deg) rotateX('+it.bx.toFixed(1)+'deg) rotateZ('+it.rz.toFixed(1)+'deg) translate(-50%,-50%)';
+    }
+  }
+
+  /* ---- loop ---- */
+  _loop(){
+    requestAnimationFrame(()=>this._loop()); const now=performance.now();
+    const dt=Math.min(0.05,(now-this.lastFrame)/1000); this.lastFrame=now;
+
+    if(this.mode==='free'){
+      this.hold=this.holdKey||this.holdBtn;                  // keyboard + on-screen buttons share one eased motion (keys no longer staccato)
+      const wantHold=this.hold?1:0;
+      this.holdVel+=(wantHold-this.holdVel)*0.075;           // very gentle ramp → smoothest glide in and out
+      if(this.holdVel>0.002 && this.holdLast){ const h=this.holdLast, v=this.holdVel;
+        if(h.dir) this._nudge(h.dir, (this.block.clientWidth||1200)*0.0032*v);   // ~half the previous speed → much slower, calmer
+        else if(h.rot) this.torbit.x+=(h.rot==='left'?1:-1)*0.32*v;   // walk around via buttons — slow & controlled (full 360°, stays where you leave it)
+        else this._zoom(h.zoom==='in'?1-0.011*v:1+0.011*v);                       // slower, smoother zoom
+        if(this.hold) this._input(); }
+      if(!this.panning && !this.hold && !this.drift && this.countdown===null && (Math.abs(this.pvx||0)>0.25||Math.abs(this.pvy||0)>0.25)){
+        this.t.x+=this.pvx; this.t.y+=this.pvy; this.pvx*=0.9; this.pvy*=0.9; this._clampPan(); }   // inertia: glide to a smooth stop after releasing a drag
+      if(this.drift){
+        // drift follows a smooth continuous Lissajous path (sum of slow sines) → C∞ smooth: NO waypoints, NO direction jumps, NO edge steer-backs, ever
+        this.dphase+=dt*this.driftSpeed;
+        const sf=clamp(this.driftSpeed/0.3,0.5,1.4), ein=smooth(clamp((now-this.driftStart)/9000,0,1)), p=this.dphase;
+        const W=this.block.clientWidth||1200, H=this.block.clientHeight||800;
+        const calm=1-clamp((this.t.s/this.scaleFit-1)/3,0,1)*0.9;
+        // camera-centre path in world coords, bounded well inside the cloud (so it never reaches an edge)
+        const pathx=(Math.sin(p*0.10)*0.42+Math.sin(p*0.043+1.3)*0.15)*this.spread.x;
+        const pathy=(Math.sin(p*0.082+0.7)*0.42+Math.sin(p*0.037+2.1)*0.13)*this.spread.y;
+        const cx=this._dcx0*(1-ein)+pathx*ein, cy=this._dcy0*(1-ein)+pathy*ein;   // start where you were, ease into the centred path
+        // gentle zoom breath, capped
+        const zc=this.scaleFit*1.14, amp=0.05+this.driftDepth*0.6;
+        const sWant=(this._dz0*(1-ein)+zc*ein)*Math.exp(Math.sin(p*0.26)*amp*ein), scap=this.t.s*0.006*sf;
+        this.t.s += clamp(sWant-this.t.s, -scap, scap);
+        // pan derived from centre × scale, hard-capped in screen space (constant speed limit regardless of zoom → no pulsing)
+        const lx=Math.max(0,this.spread.x*this.t.s-W*0.42), ly=Math.max(0,this.spread.y*this.t.s-H*0.42);
+        const xW=clamp(-cx*this.t.s,-lx,lx), yW=clamp(-cy*this.t.s,-ly,ly), vmax=W*0.0024*sf;
+        this.t.x += clamp(xW-this.t.x,-vmax,vmax); this.t.y += clamp(yW-this.t.y,-vmax,vmax);
+        // gentle rotation sway (calmed when zoomed in)
+        this.torbit.x=Math.sin(p*0.055)*5*ein*calm; this.torbit.y=Math.sin(p*0.045+1)*2.5*ein*calm;
+      } else if(this.countdown!==null){
+        if(now>=this.countdown) this._startDrift(); else this._cdText();
+      } else if(now-this.lastInput>25000){ this._startCountdown(); }  // 25s idle + 5s countdown = drift at 30s
+    }
+
+    if(this.tw.active){                                    // eased ease-in-out for focus / return (pan + scale + orbit)
+      const e=clamp((now-this.tw.t0)/this.tw.dur,0,1), k=smooth(e), a=this.tw.from, b=this.tw.to;
+      this.pan.x=a.x+(b.x-a.x)*k; this.pan.y=a.y+(b.y-a.y)*k; this.scale=a.s+(b.s-a.s)*k;
+      this.rx=a.rx+(b.rx-a.rx)*k; this.ry=a.ry+(b.ry-a.ry)*k;
+      this.orbit.x=a.ox+(b.ox-a.ox)*k; this.orbit.y=a.oy+(b.oy-a.oy)*k;
+      if(e>=1){ this.tw.active=false; if(this.mode==='return'){ this.mode='free'; this.focusItem=null; this.block.classList.remove('is-focus'); } }
+    } else {
+      const L=this.drift?0.06:0.115;                      // stronger easing everywhere → every move accelerates in and glides out smoothly
+      this.pan.x+=(this.t.x-this.pan.x)*L; this.pan.y+=(this.t.y-this.pan.y)*L;
+      this.scale+=(this.t.s-this.scale)*L; this.rx+=(this.t.rx-this.rx)*L; this.ry+=(this.t.ry-this.ry)*L;
+      if(this.mode==='free'){
+        const OL=this.drift?0.045:0.08;
+        this.orbit.x+=(this.torbit.x-this.orbit.x)*OL; this.orbit.y+=(this.torbit.y-this.orbit.y)*OL;   // rotation PERSISTS — rotate the cloud and it stays put; Fit-in-view / drift reset it
+        const vx=this.pan.x-this.lastPX, vy=this.pan.y-this.lastPY;                        // subtle motion tilt
+        this.t.rx+=(clamp(vy*0.02,-4,4)-this.t.rx)*0.1; this.t.ry+=(clamp(-vx*0.02,-4,4)-this.t.ry)*0.1; }
+    }
+    if(this.drift){   // ABSOLUTE speed limiter on the rendered camera during drift — physically forbids ANY quick move, whatever caused it
+      const W2=this.block.clientWidth||1200, st=(c,p,cap)=>p+clamp(c-p,-cap,cap);
+      this.pan.x=st(this.pan.x,this._lpx??this.pan.x,W2*0.0026); this.pan.y=st(this.pan.y,this._lpy??this.pan.y,W2*0.0026);
+      this.scale=st(this.scale,this._lsc??this.scale,(this._lsc??this.scale)*0.0055);   // ≤0.55%/frame → gentle zoom only
+      this.orbit.x=st(this.orbit.x,this._lox??this.orbit.x,0.16); this.orbit.y=st(this.orbit.y,this._loy??this.orbit.y,0.16);   // ≤0.16°/frame → gentle rotation only
+    }
+    this._lpx=this.pan.x; this._lpy=this.pan.y; this._lsc=this.scale; this._lox=this.orbit.x; this._loy=this.orbit.y;
+    this.lastPX=this.pan.x; this.lastPY=this.pan.y;
+
+    const wantDim=(this.focusItem&&this.mode==='focus')?0.35:0;
+    this.dim+=(wantDim-this.dim)*0.12;
+
+    this._apply();
+    this._billboard();   // photos keep facing the camera as the world orbits → true 360° walk-around
+    this._updateCapHud();   // keep the flat title pill glued to the hovered work
+
+    this.reveal+=(1-this.reveal)*0.04;   // new series photos ease in smoothly after a switch
+    const fitN=this.scaleMin/this.scaleFit;
+    const zf=0.22+0.78*clamp((this.scale/this.scaleFit-fitN)/((1-fitN)||1),0,1);   // zoom all the way out → photos fade into fog
+    // focus plane = "walking in fog": keep the N works NEAREST to where you are clear (N from the slider), fog the rest → works for 3 photos or 45
+    const fogOn=this.focusPlane<0.99;
+    const cx=-this.pan.x/this.scale, cy=-this.pan.y/this.scale;                    // world point under the screen centre = your position in the cloud
+    const sig=((zf*300)|0)+'|'+((this.dim*60)|0)+'|'+((this.reveal*60)|0)+'|'+(this.focusItem?1:0)+'|'+((this.focusPlane*40)|0)
+      +(fogOn?'|'+((cx/38)|0)+'|'+((cy/38)|0):'');                                  // when the fog is on, refresh as you move; when off, don't (perf)
+    if(sig!==this._opSig){ this._opSig=sig;
+      let reach=Infinity, soft=1;
+      if(fogOn){
+        const ds=this.items.map(it=>Math.hypot(it.x-cx,it.y-cy)).sort((a,b)=>a-b);   // distance to every work, nearest first
+        const k=clamp(Math.round(this.focusPlane*this.items.length),1,this.items.length);   // keep the k nearest clear (ALWAYS ≥1 → never all-fogged)
+        reach=ds[k-1]; soft=Math.max(this.spread.x*0.28,(ds[Math.min(ds.length-1,k)]-reach)+reach*0.12+140);   // fade softly beyond the k-th toward the next
+      }
+      for(const it of this.items){
+        const near=fogOn?clamp(1-(Math.hypot(it.x-cx,it.y-cy)-reach)/soft,0.04,1):1;   // the k nearest stay clear, the rest fade into fog
+        let o=(0.86+0.14*it._dN)*zf*this.reveal*near;
+        if(this.focusItem) o*=(1-this.dim);
+        it.el.style.opacity=o.toFixed(3);
+        it.el.style.pointerEvents = this.focusItem ? '' : (o<0.05 ? 'none' : 'auto');   // fogged-out photos never block a click
+      }
+    }
+  }
+}
+
+/* ------------------------------ page wiring ------------------------------ */
+const block=document.getElementById('cloud');
+const cloud=new PhotoCloud(block);
+let current=null, firstLoad=true;
+
+function setSeries(s){ current=s;
+  cloud._input();                                   // switching series resets the idle→drift timer (and stops any drift) so it never drifts mid-browse
+  document.getElementById('hTitle').textContent=s.name;
+  document.getElementById('hSub').textContent=s.sub;
+  document.getElementById('hText').textContent=s.desc;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.toggle('active',p.dataset.id===s.id));
+  const seq=document.getElementById('seq'); seq.innerHTML='<h2>'+(s.id==='__all__'?'All works · all series':'All works in this series')+'</h2>';
+  s.photos.forEach(p=>{ const f=document.createElement('figure'); f.id='seq-'+p.id;
+    f.innerHTML='<img loading="lazy" src="'+p.url+'" alt=""><figcaption><strong>'+p.title+'</strong><br><span class="yr">'+p.year+'</span></figcaption>';
+    seq.appendChild(f); });
+  if(firstLoad){ firstLoad=false; cloud.load(s.photos); return; }
+  const big=s.photos.length>24;                            // "All series" etc. — more to load, so linger a touch
+  block.classList.add('switching');                        // dissolve the swap through fog/blur
+  const ld=document.getElementById('loading'); ld.textContent='Loading…'; ld.classList.remove('gone');
+  clearTimeout(setSeries._t);
+  setSeries._t=setTimeout(()=>{ cloud.load(s.photos,true);                        // swap once the fog is fully in
+    setTimeout(()=>{ block.classList.remove('switching'); ld.classList.add('gone'); }, big?900:260);   // hold the fog longer for big sets; the reveal-fade keeps easing in underneath
+  }, big?1000:820);
+}
+
+// build pills (All series first)
+const pills=document.getElementById('pills');
+function buildApp(){ pills.innerHTML='';
+  const GRID='<svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" style="vertical-align:-1px;margin-right:6px"><rect width="4.6" height="4.6" rx="1"/><rect x="7.4" width="4.6" height="4.6" rx="1"/><rect y="7.4" width="4.6" height="4.6" rx="1"/><rect x="7.4" y="7.4" width="4.6" height="4.6" rx="1"/></svg>';
+  PILLS.forEach(s=>{ const b=document.createElement('button'); b.className='pill'+(s.id==='__all__'?' all':'');
+    b.dataset.id=s.id; if(s.id==='__all__') b.innerHTML=GRID+s.name; else b.textContent=s.name; b.onclick=()=>setSeries(s); pills.appendChild(b);
+    if(s.id==='__all__'){ const d=document.createElement('span'); d.className='pdiv'; pills.appendChild(d); } });
+  setSeries(PILLS[0]);   // default to the "All series" view (PILLS[0]); ?all no longer needed but harmless
+}
+
+// controls
+document.getElementById('panelX').onclick=()=>cloud._closeFocus();
+function _afterMaxH(el,cb){ const h=e=>{ if(e.target!==el||e.propertyName!=='max-height')return; el.removeEventListener('transitionend',h); cb(); }; el.addEventListener('transitionend',h); }
+document.getElementById('pSum').onclick=()=>{ const d=document.getElementById('pDrop'), body=document.getElementById('pBody');
+  const open=d.classList.toggle('open');
+  if(open){ body.style.maxHeight=body.scrollHeight+'px'; _afterMaxH(body,()=>{ if(d.classList.contains('open')) body.style.maxHeight='none'; }); }   // once fully open, remove the cap → pscroll shows every line, no tail clipping
+  else { body.style.maxHeight=body.scrollHeight+'px'; void body.offsetHeight; requestAnimationFrame(()=>{ body.style.maxHeight='0px'; }); } };   // set an explicit height first so 'none'→0 still animates shut
+let cardFs=14;                                             // A− / A+ → scales the WHOLE photo card (title, year, series, description…)
+function setDescFs(v){ cardFs=Math.max(11,Math.min(22,v)); document.getElementById('panel').style.setProperty('--cardfs',cardFs+'px');
+  if(document.getElementById('pDrop').classList.contains('open')) document.getElementById('pBody').style.maxHeight='none';   // uncapped while open → larger text never gets clipped
+  if(document.getElementById('pDesc')._open) document.getElementById('pExtra').style.maxHeight='none'; }
+document.getElementById('tszUp').onclick=()=>setDescFs(cardFs+1);
+document.getElementById('tszDn').onclick=()=>setDescFs(cardFs-1);
+document.getElementById('pMore').onclick=()=>{ const pd=document.getElementById('pDesc'), px=document.getElementById('pExtra'), pm=document.getElementById('pMore'), body=document.getElementById('pBody');
+  pd._open=!pd._open; pm.textContent=pd._open?'Show less':'Read more';
+  body.style.maxHeight='none';                                            // About is open whenever Read-more shows → let the container grow freely; only the extra text animates
+  if(pd._open){ px.classList.add('open'); px.style.maxHeight=px.scrollHeight+'px'; _afterMaxH(px,()=>{ if(pd._open) px.style.maxHeight='none'; }); }   // slide the extra open, then uncap so nothing is clipped
+  else { px.style.maxHeight=px.scrollHeight+'px'; void px.offsetHeight; requestAnimationFrame(()=>{ px.style.maxHeight='0px'; }); px.classList.remove('open'); } };   // slide it shut smoothly
+document.getElementById('btnDrift').onclick=()=>{
+  if(cloud.drift){ cloud._stopDrift(); cloud.lastInput=performance.now(); }
+  else { cloud._startDrift(); }
+};
+document.getElementById('driftSpeed').oninput=e=>{ cloud.driftSpeed=parseFloat(e.target.value); };
+document.getElementById('driftDepth').oninput=e=>{ cloud.driftDepth=parseFloat(e.target.value); };
+document.getElementById('focusPlane').oninput=e=>{ cloud.focusPlane=parseFloat(e.target.value); };   // near = fog, far = all layers clear
+const regsToggle=document.getElementById('regsToggle'), regs=document.getElementById('regs');   // phone: tap to open the drift settings panel
+regsToggle.onclick=e=>{ e.stopPropagation(); const open=regs.classList.toggle('open'); regsToggle.classList.toggle('on',open); };
+document.addEventListener('pointerdown',e=>{ if(regs.classList.contains('open') && !regs.contains(e.target) && !regsToggle.contains(e.target)){ regs.classList.remove('open'); regsToggle.classList.remove('on'); } });
+(function(){ const mn=document.getElementById('mobileNote');   // phones only (small min-dimension + touch) — tablets/computers are fine
+  const phone=(('ontouchstart' in window)||navigator.maxTouchPoints>0) && Math.min(screen.width||9999,screen.height||9999)<=560;
+  if(phone && mn){ mn.classList.add('show'); document.getElementById('mobileNoteOk').onclick=()=>mn.classList.remove('show'); } })();
+document.getElementById('btnReset').onclick=()=>cloud.resetView(false);
+const SUN='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 1.6v2.3M12 20.1v2.3M1.6 12h2.3M20.1 12h2.3M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M19.4 4.6l-1.6 1.6M6.2 17.8l-1.6 1.6"/></svg>';
+const MOON='<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+const LOGO_W="https://cloud.teimur-bek-safiuli.com/visuals/tbs_blur_w_transparent_fit.png";  // white logo on the dark theme
+const LOGO_B="https://cloud.teimur-bek-safiuli.com/visuals/tbs_blur_b_transparent_fit.png";  // black logo on the light theme
+const btnTheme=document.getElementById('btnTheme'), logo=document.getElementById('logo'), bgpop=document.getElementById('bgpop');
+const CONTRAST='<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.2a8.8 8.8 0 0 0 0 17.6z" fill="currentColor"/></svg>';
+function applyBg(cls){                                        // canvas background: '' beige · bg-white · bg-grey · night(black)
+  document.body.classList.remove('bg-white','bg-grey','night'); if(cls) document.body.classList.add(cls);
+  logo.src=(cls==='night'||cls==='bg-grey')?LOGO_W:LOGO_B; btnTheme.innerHTML=CONTRAST;
+  bgpop.querySelectorAll('.bgsw').forEach(s=>s.classList.toggle('active',(s.dataset.bg||'')===(cls||''))); }
+btnTheme.onclick=e=>{ e.stopPropagation(); bgpop.classList.toggle('open'); };
+bgpop.querySelectorAll('.bgsw').forEach(s=>s.onclick=()=>{ applyBg(s.dataset.bg||''); bgpop.classList.remove('open'); });
+document.addEventListener('pointerdown',e=>{ if(bgpop.classList.contains('open') && !bgpop.contains(e.target) && !btnTheme.contains(e.target)) bgpop.classList.remove('open'); });
+applyBg('bg-white');   // start on white by default
+
+const EYE='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19C5.5 19 2 12 2 12a18 18 0 0 1 4.2-5M9.8 4.2A10.7 10.7 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.3 3.3M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20"/></svg>';
+const btnTextEl=document.getElementById('btnText');
+btnTextEl.onclick=()=>cloud.setText(!cloud.showText); cloud.setText(true);   // sets the eye / eye-off icon + state tooltip
+
+const SHUF='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>';
+const btnShuf=document.getElementById('btnShuffle'); btnShuf.innerHTML=SHUF; btnShuf.onclick=()=>cloud.shuffle();
+
+const hint=document.getElementById('hint'); setTimeout(()=>hint.classList.add('gone'),7000);
+document.getElementById('padnoteX').onclick=()=>{ const pn=document.querySelector('.padnote'); if(pn) pn.style.display='none'; };   // dismiss the walk-around note
+block.addEventListener('pointerdown',()=>hint.classList.add('gone'),{once:true});
+
+document.getElementById('menuCloud').onclick=()=>enterFs();
+
+/* ---- fullscreen / minimise (iframe needs allow="fullscreen"; also works standalone) ---- */
+function isFs(){ return document.fullscreenElement===block || block.classList.contains('css-full'); }
+function enterFs(){ if(block.requestFullscreen){ block.requestFullscreen().then(sync).catch(()=>cssFull(true)); } else cssFull(true); }
+function exitFs(){ if(document.fullscreenElement){ document.exitFullscreen().then(sync).catch(()=>{}); } else cssFull(false); }
+function cssFull(on){ block.classList.toggle('css-full',on); document.body.classList.toggle('cloud-open',on); sync(); }
+const EXPAND='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+const MINI='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+function sync(){ const on=isFs(); const b=document.getElementById('btnFull'); b.innerHTML=on?MINI:EXPAND; b.title=on?'Minimise':'Fullscreen'; }
+document.getElementById('btnFull').onclick=()=> isFs()?exitFs():enterFs();
+document.addEventListener('fullscreenchange',sync); sync();
+
+(async()=>{                              // 1) manifest next to the app  2) live site scrape  3) bundled fallback
+  document.getElementById('loading').textContent='Loading works…';
+  let list=null;
+  try{ const r=await fetch('series.json',{cache:'no-cache'}); if(r.ok){ const j=await r.json(); if(Array.isArray(j)&&j.length) list=j; } }catch(e){}
+  if(!list){ try{ const d=await discoverFromSite(); if(d && d.length) list=d; }catch(e){} }
+  buildData(list||SERIES);
+  buildApp();
+})();
+</script>
+</body>
+</html>
