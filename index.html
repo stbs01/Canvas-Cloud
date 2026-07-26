@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Photo Cloud — prototype</title>
+<title>Canvas Cloud | Studio Teimur Bek Safiuli</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root{ --page-bg:#f4f2ee; --ink:#141414; --muted:#6b6b6b; --line:#d9d5cd; --cbg:#eeeae1; --uf:#141414; }   /* beige (default) */
   body.bg-white{ --page-bg:#fbfbfb; --ink:#141414; --muted:#6b6b6b; --line:#e7e7e7; --cbg:#ffffff; --uf:#141414; }
@@ -74,9 +78,9 @@
   .cloud-ui .bar .btns{display:flex;gap:7px;flex:none;align-items:center}
   .cloud-ui .bar .logo{height:30px;width:auto;flex:none;margin-right:18px;border-radius:5px;display:block;
     pointer-events:auto;opacity:.96;filter:drop-shadow(0 1px 4px rgba(0,0,0,.45))}
-  .ctl{pointer-events:auto;background:rgba(128,128,128,.16);border:1px solid rgba(128,128,128,.4);
+  .ctl{pointer-events:auto;touch-action:manipulation;background:rgba(128,128,128,.16);border:1px solid rgba(128,128,128,.4);
     color:var(--uf);border-radius:999px;padding:6px 11px;cursor:pointer;font-size:12px;
-    backdrop-filter:blur(4px);transition:background .15s,opacity .15s;line-height:1}
+    backdrop-filter:blur(4px);transition:background .15s,opacity .15s;line-height:1}   /* touch-action:manipulation → taps fire instantly & reliably on mobile (no swallowed clicks) */
   .ctl:hover{background:rgba(128,128,128,.3)}
   .ctl.on{background:var(--uf);color:var(--cbg);border-color:var(--uf)}
   .reg{display:inline-flex;align-items:center;gap:6px;pointer-events:auto}
@@ -177,7 +181,8 @@
     -webkit-mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4L11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>') center/contain no-repeat;
     mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4L11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>') center/contain no-repeat}   /* bolder external-link icon → series page */
   .panel .pseries:hover{opacity:1}
-  .panel .pdrop{margin-top:10px}
+  .panel .aboutrow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:11px}   /* mobile default: "About the series" + A−/A+ share one row → saves the whole bottom row */
+  .panel .aboutrow .pdrop{margin:0}
   .panel .psum{background:none;border:none;padding:0;color:inherit;cursor:pointer;font-size:.9em;opacity:.88;
     display:inline-flex;align-items:center;gap:6px;user-select:none}   /* plain text (not a button), just a clearer arrow */
   .panel .psum:hover{opacity:1}
@@ -189,7 +194,12 @@
   .panel .pbody{max-height:0;overflow:hidden;transition:max-height .42s cubic-bezier(.2,.8,.2,1)}
   .panel .desc{font-size:.93em;margin-top:8px;line-height:1.55;opacity:.85}
   .panel .descx{font-size:.93em;line-height:1.55;opacity:.85;max-height:0;overflow:hidden;transition:max-height .5s cubic-bezier(.2,.8,.2,1)}
-  .panel .tsize{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:15px}
+  .panel .tsize{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  @media(min-width:721px){                                   /* desktop keeps A−/A+ pinned at the bottom-right (unchanged look); only mobile puts them inline */
+    .panel .aboutrow{display:block}
+    .panel .aboutrow .tsize{position:absolute;right:18px;bottom:14px}
+    .panel{padding-bottom:48px}
+  }
   .panel .tszbtn{font:inherit;font-size:14px;line-height:1;padding:5px 11px;border-radius:8px;border:1px solid color-mix(in srgb,currentColor 26%,transparent);background:none;color:inherit;cursor:pointer}
   .panel .tszbtn:hover{background:color-mix(in srgb,currentColor 9%,transparent)}
   .panel .desc p,.panel .descx p{margin:0 0 .7em}
@@ -220,9 +230,9 @@
     .pills{order:3;flex-basis:100%;min-width:100%}
     .dlbl{display:none}
     .regs-toggle{display:inline-flex}                         /* phone: a tap-to-open drift settings panel instead of inline sliders */
-    .regs{display:none;position:absolute;top:calc(100% + 8px);right:8px;flex-direction:column;align-items:stretch;gap:16px;
-      background:var(--cbg);border:1px solid rgba(128,128,128,.32);   /* SOLID bg, no backdrop-filter → sliders + labels render on iOS */
-      border-radius:12px;padding:15px 16px;z-index:12;min-width:216px;
+    .regs{display:none;position:fixed;top:60px;right:12px;flex-direction:column;align-items:stretch;gap:16px;
+      background:var(--cbg);border:1px solid rgba(128,128,128,.32);pointer-events:auto;   /* SOLID bg, no backdrop-filter → sliders + labels render on iOS; fixed → always on-screen regardless of how the bar wraps */
+      border-radius:12px;padding:15px 16px;z-index:40;min-width:220px;max-width:min(320px,calc(100vw - 24px));
       box-shadow:0 16px 40px -16px rgba(0,0,0,.55)}
     .regs.open{display:flex}
     .regs .reg{display:flex;width:100%;gap:10px;align-items:center}
@@ -305,14 +315,16 @@
         <div class="ttl" id="pTitle"></div>
         <div class="yr" id="pYear"></div>
         <a class="pseries" id="pSeries" target="_blank" rel="noopener"></a>
-        <div class="pdrop" id="pDrop">
-          <button class="psum" id="pSum" type="button">About the series</button>
+        <div class="aboutrow">
+          <div class="pdrop" id="pDrop">
+            <button class="psum" id="pSum" type="button">About the series</button>
+          </div>
+          <div class="tsize"><button class="tszbtn" id="tszDn" type="button" aria-label="Smaller text">A−</button><button class="tszbtn" id="tszUp" type="button" aria-label="Larger text">A+</button></div>
         </div>
       </div>
       <div class="pscroll" id="pScroll">
         <div class="pbody" id="pBody"><div class="desc" id="pDesc"></div><div class="descx" id="pExtra"></div><button class="pmore" id="pMore" type="button">Read more</button></div>
       </div>
-      <div class="tsize"><button class="tszbtn" id="tszDn" type="button" aria-label="Smaller text">A−</button><button class="tszbtn" id="tszUp" type="button" aria-label="Larger text">A+</button></div>
     </div>
 
     <div class="loading" id="loading">Loading…</div>
