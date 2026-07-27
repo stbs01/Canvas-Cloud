@@ -152,8 +152,15 @@
   .drift-msg .wv{display:inline-block;margin-right:7px;animation:wv 1.7s ease-in-out infinite}
   @keyframes wv{0%,100%{transform:translateX(-2px) rotate(-6deg);opacity:.5}50%{transform:translateX(2px) rotate(6deg);opacity:1}}
   .loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--uf);
-    letter-spacing:.1em;font-size:12px;background:var(--cbg);z-index:7;transition:opacity .5s}
+    background:var(--cbg);z-index:80;transition:opacity .6s ease}   /* full-screen overlay above everything → the app assembles behind it, revealed only when ready */
   .loading.gone{opacity:0;pointer-events:none}
+  .loading .ld-inner{display:flex;flex-direction:column;align-items:center;gap:15px}
+  .loading .ld-spin{width:34px;height:34px;border-radius:50%;
+    border:2.5px solid color-mix(in srgb,currentColor 20%,transparent);border-top-color:currentColor;
+    animation:ldspin .8s linear infinite}
+  @keyframes ldspin{to{transform:rotate(360deg)}}
+  .loading .ld-title{font-size:15px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;opacity:.9}
+  .loading .ld-sub{font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.5}
 
   /* one-time mobile hint pointing at the eye / image-only toggle */
   .eye-tip{position:fixed;top:62px;left:50%;transform:translate(-50%,-10px);z-index:50;display:none;
@@ -231,6 +238,7 @@
   .panel .min{display:none;position:absolute;top:40px;right:11px;background:none;border:none;color:inherit;font-size:26px;
     cursor:pointer;line-height:1;opacity:.72;padding:0;width:24px;height:24px;text-align:center}   /* phones only: sits BELOW the ✕. Minimise this plate → full image, no plate; tap again to bring it back */
   .panel .min:hover{opacity:1}
+  @media(max-width:720px){ .panel .min{display:block} .panel .ttl{padding-right:34px} }   /* placed AFTER the base rule so it actually wins → the − button shows on phones */
 
   /* hover-blur — every text link & button softly blurs on hover, matching the website's link behaviour */
   .pill,.ctl,.padnote-x,.mn-ok,.bgsw,
@@ -351,7 +359,7 @@
       <span>Tip: tap the eye icon in the top bar for <b>image-only mode</b> — hides every plate.</span>
       <button class="et-x" id="eyeTipX" type="button" aria-label="Dismiss">✕</button>
     </div>
-    <div class="loading" id="loading">Loading…</div>
+    <div class="loading" id="loading"><div class="ld-inner"><div class="ld-spin" aria-hidden="true"></div><div class="ld-title">Canvas Cloud</div><div class="ld-sub" id="loadingSub">Loading…</div></div></div>
     <div class="mobile-note" id="mobileNote"><div class="mn-box">
       <div class="mn-txt">For the best experience, view this on a computer or a tablet.</div>
       <button class="mn-ok" id="mobileNoteOk">Got it</button>
@@ -551,7 +559,7 @@ class PhotoCloud{
 
   load(photos,quiet){
     this.world.innerHTML=''; this.items=[]; this.loadedIds=new Set(); this.total=photos.length; this.reveal=0; this._bbOn=false;
-    const loading=document.getElementById('loading'); if(!quiet){ loading.classList.remove('gone'); loading.textContent='Loading…'; }
+    const loading=document.getElementById('loading'); if(!quiet){ loading.classList.remove('gone'); const ls=document.getElementById('loadingSub'); if(ls) ls.textContent='Loading…'; }
     const n=photos.length;
     const SX=clamp(560+n*58,820,2800), SY=SX*0.56;   // much bigger spread → real air between works, so back ones aren't buried
     this.spread={x:SX,y:SY};
@@ -948,7 +956,7 @@ function setSeries(s){ current=s;
   if(firstLoad){ firstLoad=false; cloud.load(s.photos); return; }
   const big=s.photos.length>24;                            // "All series" etc. — more to load, so linger a touch
   block.classList.add('switching');                        // dissolve the swap through fog/blur
-  const ld=document.getElementById('loading'); ld.textContent='Loading…'; ld.classList.remove('gone');
+  const ld=document.getElementById('loading'); const ls=document.getElementById('loadingSub'); if(ls) ls.textContent='Loading…'; ld.classList.remove('gone');
   clearTimeout(setSeries._t);
   setSeries._t=setTimeout(()=>{ cloud.load(s.photos,true);                        // swap once the fog is fully in
     setTimeout(()=>{ block.classList.remove('switching'); ld.classList.add('gone'); }, big?900:260);   // hold the fog longer for big sets; the reveal-fade keeps easing in underneath
@@ -1040,7 +1048,7 @@ document.getElementById('btnFull').onclick=()=> isFs()?exitFs():enterFs();
 document.addEventListener('fullscreenchange',sync); sync();
 
 (async()=>{                              // 1) manifest next to the app  2) live site scrape  3) bundled fallback
-  document.getElementById('loading').textContent='Loading works…';
+  document.getElementById('loadingSub').textContent='Loading works…';
   let list=null;
   try{ const r=await fetch('series.json',{cache:'no-cache'}); if(r.ok){ const j=await r.json(); if(Array.isArray(j)&&j.length) list=j; } }catch(e){}
   if(!list){ try{ const d=await discoverFromSite(); if(d && d.length) list=d; }catch(e){} }
