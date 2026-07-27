@@ -163,6 +163,9 @@
     opacity:0;transition:opacity .35s ease,transform .35s ease}
   .eye-tip.show{display:flex;opacity:1;transform:translate(-50%,0)}
   .eye-tip svg{flex:0 0 auto;opacity:.9}
+  .eye-tip .et-x{flex:0 0 auto;margin-left:2px;background:none;border:none;color:inherit;font-size:15px;line-height:1;
+    cursor:pointer;opacity:.55;padding:2px 4px}
+  .eye-tip .et-x:hover{opacity:1}
 
   /* description panel */
   .panel{position:absolute;right:20px;top:50%;width:300px;max-width:calc(100% - 40px);max-height:calc(100% - 132px);transform:translate(120%,-50%);z-index:9;font-size:var(--cardfs,14px);
@@ -181,9 +184,9 @@
   @media(max-width:720px){
     .panel{right:auto;left:50%;top:auto;bottom:14px;width:min(560px,calc(100% - 24px));transform:translate(-50%,140%);max-height:calc(100% - 84px);overflow:hidden}
     .panel.open{transform:translate(-50%,0)}
-    .panel.open.min{transform:translate(-50%,calc(100% - 50px))}   /* minimised: slide down, leaving a slim handle with the +/✕ buttons → the full image shows */
+    .panel.open.min{transform:translate(-50%,calc(100% - 74px))}   /* minimised: slide down, leaving a handle with the stacked ✕ / + buttons → the full image shows */
     .panel .min{display:block}
-    .panel .ttl{padding-right:60px}   /* clear BOTH the − and ✕ buttons */
+    .panel .ttl{padding-right:34px}   /* clear the ✕ / − button column on the right */
   }
   .panel .ttl{font-weight:600;font-size:1.08em;line-height:1.3;padding-right:26px}
   .panel .yr{color:var(--muted);font-size:.9em;margin-top:3px}
@@ -225,8 +228,8 @@
   .panel .x{position:absolute;top:10px;right:12px;background:none;border:none;color:inherit;font-size:20px;
     cursor:pointer;line-height:1;opacity:.6}
   .panel .x:hover{opacity:1}
-  .panel .min{display:none;position:absolute;top:9px;right:42px;background:none;border:none;color:inherit;font-size:24px;
-    cursor:pointer;line-height:1;opacity:.6;padding:0;width:22px;text-align:center}   /* phones only: minimise this plate → full image, no plate; tap again to bring it back */
+  .panel .min{display:none;position:absolute;top:40px;right:11px;background:none;border:none;color:inherit;font-size:26px;
+    cursor:pointer;line-height:1;opacity:.72;padding:0;width:24px;height:24px;text-align:center}   /* phones only: sits BELOW the ✕. Minimise this plate → full image, no plate; tap again to bring it back */
   .panel .min:hover{opacity:1}
 
   /* hover-blur — every text link & button softly blurs on hover, matching the website's link behaviour */
@@ -346,6 +349,7 @@
     <div class="eye-tip" id="eyeTip">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
       <span>Tip: tap the eye icon in the top bar for <b>image-only mode</b> — hides every plate.</span>
+      <button class="et-x" id="eyeTipX" type="button" aria-label="Dismiss">✕</button>
     </div>
     <div class="loading" id="loading">Loading…</div>
     <div class="mobile-note" id="mobileNote"><div class="mn-box">
@@ -771,8 +775,8 @@ class PhotoCloud{
     if(!(touch && window.matchMedia('(max-width:720px)').matches)) return;
     this._eyeTipShown=true;
     const t=document.getElementById('eyeTip'); if(!t) return;
-    t.classList.add('show'); t.onclick=()=>t.classList.remove('show');
-    clearTimeout(this._eyeTipT); this._eyeTipT=setTimeout(()=>t.classList.remove('show'),6500);
+    t.classList.add('show');                                 // stays until the viewer taps its ✕
+    const x=document.getElementById('eyeTipX'); if(x) x.onclick=()=>t.classList.remove('show');
   }
 
   /* ---- drift with countdown + smooth ease-in ---- */
